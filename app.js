@@ -729,12 +729,20 @@ function showBdayPopup(bdays) {
 }
 
 function closeBdayPopup() {
-  document.getElementById('birthdayPopup').classList.add('hidden');
+  const popup = document.getElementById('birthdayPopup');
+  if (popup) {
+    popup.classList.add('hidden');
+    popup.style.display = 'none'; // sécurité anti-bug
+  }
 }
 
 // Fermer en cliquant sur le fond
-document.getElementById('birthdayPopup').addEventListener('click', function(e) {
-  if (e.target === this) closeBdayPopup();
+const popup = document.getElementById('birthdayPopup');
+
+popup.addEventListener('click', (e) => {
+  if (e.target.id === "birthdayPopup") {
+    closeBdayPopup();
+  }
 });
 
 // Fermer avec Echap
