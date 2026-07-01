@@ -429,7 +429,7 @@ textarea{resize:vertical}
 /* ════════════════════════════════════
    BIRTHDAY POPUP
 ════════════════════════════════════ */
-.popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);z-index:800;display:flex;align-items:center;justify-content:center;padding:24px}
+.popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);z-index:9000;display:flex;align-items:center;justify-content:center;padding:24px}
 .popup-card{background:var(--bg2);border:1px solid rgba(251,191,36,.3);border-radius:24px;padding:32px 24px;text-align:center;width:100%;max-width:360px;position:relative;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5),0 0 40px rgba(251,191,36,.2)}
 .popup-confetti{position:absolute;inset:0;pointer-events:none}
 .bday-emoji{font-size:56px;margin-bottom:12px;animation:bounce 1s ease-in-out infinite}

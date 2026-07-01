@@ -32,10 +32,11 @@
   <div id="birthdayPopup" class="popup-overlay hidden">
     <div class="popup-card birthday-popup">
       <div class="popup-confetti" id="popupConfetti"></div>
+      <button onclick="closeBdayPopup()" style="position:absolute;top:12px;right:14px;background:rgba(255,255,255,.15);border:none;border-radius:8px;color:white;font-size:18px;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10">✕</button>
       <div class="bday-emoji">🎂</div>
       <div class="bday-title">Joyeux Anniversaire !</div>
       <div class="bday-names" id="bdayNames"></div>
-      <button class="btn btn-primary" onclick="closeBdayPopup()">🎉 Super !</button>
+      <button class="btn btn-primary" onclick="closeBdayPopup()" style="position:relative;z-index:10">🎉 Super !</button>
     </div>
   </div>
 
@@ -279,7 +280,10 @@
           <div class="input-group"><label>Prénom / Nom</label><input type="text" id="bdayName" placeholder="Marie Dupont"></div>
           <div class="input-group"><label>Date de naissance</label><input type="date" id="bdayDate"></div>
         </div>
-        <button class="btn btn-primary" onclick="addBirthday()">🎂 Ajouter</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="addBirthday()">🎂 Ajouter</button>
+          <button class="btn btn-ghost btn-sm" onclick="testBdayPopup()" title="Voir le popup de démonstration">🎉 Tester le popup</button>
+        </div>
       </div>
       <div id="bdayList"></div>
     </div>

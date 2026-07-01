@@ -711,20 +711,42 @@ function checkBirthdays() {
   const todayMD = `${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
   const todayBdays = S.birthdays.filter(b => b.date.slice(5) === todayMD);
   if (!todayBdays.length) return;
-  // Vérifier si déjà affiché aujourd'hui
   const lastShown = localStorage.getItem('bdayShown_' + currentUser);
   if (lastShown === todayKey()) return;
   localStorage.setItem('bdayShown_' + currentUser, todayKey());
-  document.getElementById('bdayNames').innerHTML = todayBdays.map(b => {
+  showBdayPopup(todayBdays);
+}
+
+function showBdayPopup(bdays) {
+  const today = new Date();
+  document.getElementById('bdayNames').innerHTML = bdays.map(b => {
     const age = today.getFullYear() - new Date(b.date).getFullYear();
     return `<div>🎂 ${b.name} — ${age} ans !</div>`;
   }).join('');
-  document.getElementById('birthdayPopup').classList.remove('hidden');
+  const popup = document.getElementById('birthdayPopup');
+  popup.classList.remove('hidden');
   spawnBdayConfetti();
 }
 
 function closeBdayPopup() {
   document.getElementById('birthdayPopup').classList.add('hidden');
+}
+
+// Fermer en cliquant sur le fond
+document.getElementById('birthdayPopup').addEventListener('click', function(e) {
+  if (e.target === this) closeBdayPopup();
+});
+
+// Fermer avec Echap
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeBdayPopup();
+});
+
+// Tester le popup (bouton démonstration)
+function testBdayPopup() {
+  // Réinitialiser le flag pour permettre le re-test
+  localStorage.removeItem('bdayShown_' + currentUser);
+  showBdayPopup([{ name: 'Marie (test)', date: '1990-' + pad(new Date().getMonth()+1) + '-' + pad(new Date().getDate()) }]);
 }
 
 function spawnBdayConfetti() {
