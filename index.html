@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>🌟 Suivi de Vie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="dark">
+
+<!-- ══ LOGIN ══ -->
+<div id="loginScreen">
+  <div class="login-bg"><div class="lb1"></div><div class="lb2"></div><div class="lb3"></div></div>
+  <div class="login-card">
+    <div class="login-emoji">🌟</div>
+    <div class="login-title">Suivi de Vie</div>
+    <div class="login-sub">Votre journal quotidien intelligent</div>
+    <div class="login-form">
+      <label>Votre prénom</label>
+      <input type="text" id="loginInput" placeholder="Ex : Marie" autocomplete="given-name">
+      <button id="loginBtn">Commencer <span>→</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ APP ══ -->
+<div id="app" style="display:none">
+
+  <!-- POPUP ANNIVERSAIRE -->
+  <div id="birthdayPopup" class="popup-overlay hidden">
+    <div class="popup-card birthday-popup">
+      <div class="popup-confetti" id="popupConfetti"></div>
+      <div class="bday-emoji">🎂</div>
+      <div class="bday-title">Joyeux Anniversaire !</div>
+      <div class="bday-names" id="bdayNames"></div>
+      <button class="btn btn-primary" onclick="closeBdayPopup()">🎉 Super !</button>
+    </div>
+  </div>
+
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="topbar-left">
+      <button class="menu-btn" onclick="toggleMenu()">☰</button>
+      <div class="topbar-info">
+        <div class="topbar-title" id="topbarTitle">Aujourd'hui</div>
+        <div class="topbar-date" id="topbarDate"></div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="theme-btn" onclick="cycleTheme()" title="Changer le thème">🎨</button>
+      <div class="sync-dot-wrap" id="syncDotWrap" title="Sync cloud">
+        <div class="sync-dot" id="syncDot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAV -->
+  <div id="bottomNav">
+    <div class="bnav" data-v="today" onclick="sv('today',this)">
+      <div class="bnav-icon">📅</div><div class="bnav-lbl">Aujourd'hui</div>
+    </div>
+    <div class="bnav" data-v="calendar" onclick="sv('calendar',this)">
+      <div class="bnav-icon">🗓</div><div class="bnav-lbl">Calendrier</div>
+    </div>
+    <div class="bnav" data-v="history" onclick="sv('history',this)">
+      <div class="bnav-icon">📋</div><div class="bnav-lbl">Historique</div>
+    </div>
+    <div class="bnav" data-v="stats" onclick="sv('stats',this)">
+      <div class="bnav-icon">📊</div><div class="bnav-lbl">Stats</div>
+    </div>
+    <div class="bnav" data-v="more" onclick="sv('more',this)">
+      <div class="bnav-icon">⚙️</div><div class="bnav-lbl">Plus</div>
+    </div>
+  </div>
+
+  <!-- SIDE MENU -->
+  <div id="sideMenuBg" onclick="toggleMenu()"></div>
+  <div id="sideMenu">
+    <div class="sidemenu-header">
+      <div class="sidemenu-avatar" id="sidemenuAvatar">?</div>
+      <div class="sidemenu-name" id="sidemenuName">—</div>
+      <div class="sidemenu-role">Mon journal</div>
+    </div>
+    <div class="sidemenu-nav">
+      <div class="smitem active" onclick="sv('today',null);toggleMenu()">📅 Aujourd'hui</div>
+      <div class="smitem" onclick="sv('calendar',null);toggleMenu()">🗓 Calendrier</div>
+      <div class="smitem" onclick="sv('history',null);toggleMenu()">📋 Historique</div>
+      <div class="smitem" onclick="sv('stats',null);toggleMenu()">📊 Statistiques</div>
+      <div class="smitem" onclick="sv('planning',null);toggleMenu()">📆 Planning</div>
+      <div class="smitem" onclick="sv('birthdays',null);toggleMenu()">🎂 Anniversaires</div>
+      <div class="smitem" onclick="sv('goals',null);toggleMenu()">🎯 Objectifs</div>
+      <div class="smitem" onclick="sv('more',null);toggleMenu()">⚙️ Paramètres</div>
+    </div>
+    <div class="sidemenu-footer">
+      <button class="btn btn-ghost btn-sm" onclick="openSyncModal();toggleMenu()">☁️ Synchronisation</button>
+      <button class="btn btn-danger btn-sm" onclick="doLogout()">🚪 Déconnexion</button>
+    </div>
+  </div>
+
+  <!-- CONTENU PRINCIPAL -->
+  <div id="mainContent">
+
+    <!-- ══ VUE : AUJOURD'HUI ══ -->
+    <div class="view active" id="view-today">
+
+      <!-- SPORT -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-icon sport-icon">🏃</div>
+          <div class="section-title">Sport</div>
+          <label class="toggle-check">
+            <input type="checkbox" id="sportDone" onchange="saveToday()">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="section-body" id="sportBody">
+          <div class="input-row">
+            <div class="input-group">
+              <label>Durée (minutes)</label>
+              <input type="number" id="sportTime" min="0" max="300" placeholder="30" oninput="saveToday()">
+            </div>
+            <div class="input-group">
+              <label>Type d'activité</label>
+              <input type="text" id="sportType" placeholder="Course, vélo…" oninput="saveToday()">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MARCHE -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-icon walk-icon">🚶</div>
+          <div class="section-title">Marche</div>
+        </div>
+        <div class="section-body">
+          <div class="input-row">
+            <div class="input-group">
+              <label>Distance (km)</label>
+              <input type="number" id="walkKm" min="0" step="0.1" placeholder="2.5" oninput="updateSteps()">
+            </div>
+            <div class="input-group">
+              <label>Pas estimés</label>
+              <div class="steps-display" id="stepsDisplay">— pas</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRAVAIL -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-icon work-icon">💼</div>
+          <div class="section-title">Travail</div>
+          <div class="work-total" id="workTotalDisp">— h</div>
+        </div>
+        <div class="section-body">
+          <div class="input-row">
+            <div class="input-group">
+              <label>Début</label>
+              <input type="time" id="workStart" oninput="calcWork()">
+            </div>
+            <div class="input-group">
+              <label>Fin</label>
+              <input type="time" id="workEnd" oninput="calcWork()">
+            </div>
+            <div class="input-group">
+              <label>Pause (min)</label>
+              <input type="number" id="workBreak" min="0" max="240" value="60" placeholder="60" oninput="calcWork()">
+            </div>
+          </div>
+          <div class="work-result" id="workResult"></div>
+        </div>
+      </div>
+
+      <!-- DÉPENSES -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-icon money-icon">💰</div>
+          <div class="section-title">Dépenses</div>
+          <div class="money-total" id="moneyTotalDisp">0,00 €</div>
+        </div>
+        <div class="section-body">
+          <div class="expense-add-row">
+            <input type="number" id="expenseAmt" min="0" step="0.01" placeholder="Montant (€)">
+            <input type="text" id="expenseLabel" placeholder="Description…" onkeydown="if(event.key==='Enter')addExpense()">
+            <button class="btn btn-primary btn-sm" onclick="addExpense()">+</button>
+          </div>
+          <div class="expense-list" id="expenseList"></div>
+        </div>
+      </div>
+
+      <!-- ACTIVITÉS / NOTES -->
+      <div class="section-card">
+        <div class="section-header">
+          <div class="section-icon note-icon">📝</div>
+          <div class="section-title">Activités & Notes</div>
+        </div>
+        <div class="section-body">
+          <div class="activity-add-row">
+            <input type="text" id="activityInput" placeholder="Voyage, sortie, activité…" onkeydown="if(event.key==='Enter')addActivity()">
+            <button class="btn btn-primary btn-sm" onclick="addActivity()">+</button>
+          </div>
+          <div class="activity-list" id="activityList"></div>
+          <textarea id="notesText" placeholder="Notes libres…" oninput="saveToday()" rows="3"></textarea>
+        </div>
+      </div>
+
+      <!-- BOUTON SAUVEGARDER -->
+      <button class="btn btn-save" onclick="saveToday(true)">💾 Sauvegarder la journée</button>
+
+    </div><!-- /view-today -->
+
+    <!-- ══ VUE : CALENDRIER ══ -->
+    <div class="view" id="view-calendar">
+      <div class="cal-header-row">
+        <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
+        <div class="cal-month-label" id="calMonthLabel">—</div>
+        <button class="cal-nav-btn" onclick="calNav(1)">›</button>
+        <button class="btn btn-ghost btn-sm" onclick="calGoToday()">Auj.</button>
+      </div>
+      <div class="cal-grid-header">
+        <span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-legend">
+        <span class="leg-item"><span class="leg-dot green"></span>Complet</span>
+        <span class="leg-item"><span class="leg-dot orange"></span>Partiel</span>
+        <span class="leg-item"><span class="leg-dot red"></span>Vide</span>
+      </div>
+      <!-- Détail jour -->
+      <div class="day-detail-card" id="dayDetailCard" style="display:none">
+        <div class="day-detail-header">
+          <div class="day-detail-title" id="dayDetailTitle">—</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" onclick="editDayFromDetail()">✏️ Modifier</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('dayDetailCard').style.display='none'">✕</button>
+          </div>
+        </div>
+        <div id="dayDetailContent"></div>
+      </div>
+    </div>
+
+    <!-- ══ VUE : HISTORIQUE ══ -->
+    <div class="view" id="view-history">
+      <div class="history-filters">
+        <input type="month" id="histMonthFilter" class="field-input" oninput="renderHistory()">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('histMonthFilter').value='';renderHistory()">Tout</button>
+      </div>
+      <div id="historyList"></div>
+    </div>
+
+    <!-- ══ VUE : STATS ══ -->
+    <div class="view" id="view-stats">
+      <div class="stats-period-row">
+        <button class="period-btn active" onclick="setStatsPeriod('week',this)">Semaine</button>
+        <button class="period-btn" onclick="setStatsPeriod('month',this)">Mois</button>
+        <button class="period-btn" onclick="setStatsPeriod('year',this)">Année</button>
+      </div>
+      <div class="stats-grid" id="statsGrid"></div>
+      <div class="stats-charts" id="statsCharts"></div>
+    </div>
+
+    <!-- ══ VUE : PLANNING ══ -->
+    <div class="view" id="view-planning">
+      <div class="view-section-title">📆 Planning hebdomadaire</div>
+      <p class="view-desc">Définissez vos horaires types par jour de la semaine. Ils seront pré-remplis automatiquement.</p>
+      <div id="planningGrid"></div>
+      <button class="btn btn-primary" onclick="savePlanning()">💾 Sauvegarder le planning</button>
+    </div>
+
+    <!-- ══ VUE : ANNIVERSAIRES ══ -->
+    <div class="view" id="view-birthdays">
+      <div class="view-section-title">🎂 Anniversaires</div>
+      <div class="bday-add-form">
+        <div class="input-row">
+          <div class="input-group"><label>Prénom / Nom</label><input type="text" id="bdayName" placeholder="Marie Dupont"></div>
+          <div class="input-group"><label>Date de naissance</label><input type="date" id="bdayDate"></div>
+        </div>
+        <button class="btn btn-primary" onclick="addBirthday()">🎂 Ajouter</button>
+      </div>
+      <div id="bdayList"></div>
+    </div>
+
+    <!-- ══ VUE : OBJECTIFS ══ -->
+    <div class="view" id="view-goals">
+      <div class="view-section-title">🎯 Mes objectifs</div>
+      <div class="goals-form card-section">
+        <div class="input-row">
+          <div class="input-group"><label>👟 Pas / jour</label><input type="number" id="goalSteps" placeholder="10000" min="0"></div>
+          <div class="input-group"><label>🏃 Sport (min/semaine)</label><input type="number" id="goalSport" placeholder="150" min="0"></div>
+        </div>
+        <div class="input-row">
+          <div class="input-group"><label>💰 Budget / mois (€)</label><input type="number" id="goalBudget" placeholder="500" min="0"></div>
+          <div class="input-group"><label>💼 Heures travail / sem.</label><input type="number" id="goalWork" placeholder="35" min="0"></div>
+        </div>
+        <button class="btn btn-primary" onclick="saveGoals()">🎯 Enregistrer</button>
+      </div>
+      <div id="goalsProgress"></div>
+    </div>
+
+    <!-- ══ VUE : PLUS / PARAMÈTRES ══ -->
+    <div class="view" id="view-more">
+      <div class="view-section-title">⚙️ Paramètres</div>
+
+      <div class="settings-section">
+        <div class="settings-label">🎨 Thème</div>
+        <div class="theme-grid">
+          <div class="theme-opt" data-theme="dark" onclick="setTheme('dark')">🌙 Sombre</div>
+          <div class="theme-opt" data-theme="light" onclick="setTheme('light')">☀️ Clair</div>
+          <div class="theme-opt" data-theme="blue" onclick="setTheme('blue')">🌊 Bleu</div>
+          <div class="theme-opt" data-theme="green" onclick="setTheme('green')">🌿 Vert</div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">☁️ Cloud Firebase</div>
+        <div id="syncStatusBar" class="sync-status-bar">⚪ Non configuré</div>
+        <button class="btn btn-primary btn-sm" onclick="openSyncModal()">⚙️ Configurer la synchro</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">📤 Export</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="exportJSON()">🗄 Sauvegarde JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📊 Export CSV</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">📥 Importer<input type="file" accept=".json" style="display:none" onchange="importJSON(event)"></label>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label" style="color:var(--red)">⚠️ Danger</div>
+        <button class="btn btn-danger btn-sm" onclick="resetTodayConfirm()">🗑 Réinitialiser aujourd'hui</button>
+        <button class="btn btn-danger btn-sm" onclick="resetAllConfirm()">💣 Tout effacer</button>
+      </div>
+    </div>
+
+  </div><!-- /mainContent -->
+
+</div><!-- /app -->
+
+<!-- MODAL SYNC -->
+<div id="syncModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-hdr">
+      <div class="modal-ttl">☁️ Synchronisation Firebase</div>
+      <button class="modal-x" onclick="closeSyncModal()">✕</button>
+    </div>
+    <p class="modal-sub">Synchronisez vos données entre tous vos appareils via votre projet Firebase.</p>
+    <div id="syncStatusModal" class="sync-status-modal">⚪ Non configuré</div>
+    <label class="modal-label">Configuration Firebase (JSON)</label>
+    <textarea id="syncConfigInput" rows="6" placeholder='{
+  "apiKey": "...",
+  "authDomain": "...",
+  "projectId": "...",
+  ...
+}'></textarea>
+    <label class="modal-label">Code de synchronisation</label>
+    <input type="text" id="syncCodeInput" placeholder="Ex : mavie-2026 (même sur tous vos appareils)">
+    <label class="modal-checkbox-row">
+      <input type="checkbox" id="syncEnabled"> Synchronisation automatique
+    </label>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="connectSync(true)">☁️ Connecter</button>
+      <button class="btn btn-secondary" onclick="pushToCloud(true)">⬆️ Envoyer</button>
+      <button class="btn btn-secondary" onclick="pullFromCloud(true)">⬇️ Récupérer</button>
+      <button class="btn btn-secondary" onclick="disconnectSync()">🔌 Désactiver</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL MODIFICATION JOUR -->
+<div id="editModal" class="modal-overlay hidden">
+  <div class="modal-card modal-large">
+    <div class="modal-hdr">
+      <div class="modal-ttl" id="editModalTitle">✏️ Modifier le jour</div>
+      <button class="modal-x" onclick="closeEditModal()">✕</button>
+    </div>
+    <div id="editModalContent"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveEditModal()">💾 Sauvegarder</button>
+      <button class="btn btn-ghost" onclick="closeEditModal()">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
