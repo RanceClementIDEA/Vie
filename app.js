@@ -1,115 +1,74 @@
 /* ════════════════════════════════════════════
-   SUIVI DE VIE — app.js
-   Login simple + localStorage + Firebase sync optionnel
+   SUIVI DE VIE — app.js (v2)
+   • Authentification Firebase : e-mail / mot de passe + Google
+   • Mode local sans compte (données sur l'appareil)
+   • Données par utilisateur dans Firestore + cache hors-ligne
+   • Synchronisation temps réel entre appareils
 ════════════════════════════════════════════ */
+'use strict';
+
+/* ── CONSTANTES ── */
+const APP_VERSION   = '2.0.0';
+const STEPS_PER_KM  = 1300;
+const DEFAULT_GOALS = { steps: 10000, sport: 150, budget: 500, work: 35 };
+
+function newState() {
+  return { days: {}, planning: {}, birthdays: [], goals: { ...DEFAULT_GOALS }, profile: {} };
+}
 
 /* ── ÉTAT GLOBAL ── */
-let currentUser  = localStorage.getItem('vieUser');
+let S            = newState();
+let mode         = null;   // 'cloud' | 'local'
+let currentUser  = null;   // { uid?, email?, name }
 let currentTheme = localStorage.getItem('vieTheme') || 'dark';
+let activeView   = 'today';
 let statsPeriod  = 'week';
-let editingDate  = null; // date en cours d'édition dans la modale
 let calY, calM;
 
-// Structure des données
-let S = {
-  days:       {},   // { "2025-01-15": { sport, walk, work, expenses, activities, notes } }
-  planning:   {},   // { 0:lun, 1:mar, ... } horaires type
-  birthdays:  [],   // [{ id, name, date }]
-  goals:      { steps:10000, sport:150, budget:500, work:35 },
-};
+/* Firebase */
+let fbAuth = null, fbDb = null, unsubData = null;
+let pushTimer = null, lastPushedAt = 0, pendingSignupName = '';
 
-/* ── DOM ── */
-const loginScreen = document.getElementById('loginScreen');
-const loginInput  = document.getElementById('loginInput');
-const loginBtn    = document.getElementById('loginBtn');
-const toastEl     = document.getElementById('toast');
+/* ── HELPERS ── */
+const $   = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-/* ════════════════════════════════════════════
-   TOAST
-════════════════════════════════════════════ */
+/* ── TOAST ── */
 let _tt;
-function showToast(msg, dur=2400) {
+function showToast(msg, dur = 2400) {
   clearTimeout(_tt);
-  toastEl.textContent = msg;
-  toastEl.classList.add('show');
-  _tt = setTimeout(() => toastEl.classList.remove('show'), dur);
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  _tt = setTimeout(() => t.classList.remove('show'), dur);
 }
 
-/* ════════════════════════════════════════════
-   LOGIN / LOGOUT
-════════════════════════════════════════════ */
-loginBtn.addEventListener('click', () => {
-  const u = loginInput.value.trim();
-  if (!u) { loginInput.focus(); return; }
-  doLogin(u);
-});
-loginInput.addEventListener('keydown', e => { if (e.key==='Enter') loginBtn.click(); });
-
-function doLogin(user) {
-  currentUser = user;
-  localStorage.setItem('vieUser', user);
-  loginScreen.style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-  document.getElementById('sidemenuAvatar').textContent = user.charAt(0).toUpperCase();
-  document.getElementById('sidemenuName').textContent   = user;
-  setTheme(currentTheme, false);
-  loadState();
-  initApp();
-  try { connectSync(false); } catch(e) { console.error('Sync:', e); }
-}
-
-function doLogout() {
-  localStorage.removeItem('vieUser');
-  currentUser = null;
-  S = { days:{}, planning:{}, birthdays:[], goals:{ steps:10000, sport:150, budget:500, work:35 } };
-  document.getElementById('app').style.display = 'none';
-  loginScreen.style.display = 'flex';
-  loginInput.value = '';
-}
-
-/* ════════════════════════════════════════════
-   PERSISTANCE LOCALE
-════════════════════════════════════════════ */
-const LS_KEY = () => 'vie_data_' + currentUser;
-
-function saveState() {
-  localStorage.setItem(LS_KEY(), JSON.stringify(S));
-  scheduleAutoSync();
-}
-function loadState() {
-  try {
-    const r = localStorage.getItem(LS_KEY());
-    if (r) S = { ...S, ...JSON.parse(r) };
-  } catch(e) {}
-}
-
-/* ════════════════════════════════════════════
-   UTILS
-════════════════════════════════════════════ */
-const pad = (n) => String(n).padStart(2,'0');
-const todayKey = () => { const n=new Date(); return `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}`; };
+/* ── DATES / FORMATS ── */
+const pad      = n => String(n).padStart(2, '0');
+const todayKey = () => { const n = new Date(); return `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}`; };
 const fmtDate  = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-const parseT   = s => { if(!s)return 0; const[h,m]=s.split(':').map(Number); return h*60+m; };
-const minToHM  = m => { const h=Math.floor(m/60),mi=Math.round(m%60); return `${h}h${pad(mi)}`; };
-const fmtMoney = n => n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
-const dayNames = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const parseT   = s => { if (!s) return 0; const [h, m] = s.split(':').map(Number); return h*60 + m; };
+const minToHM  = m => { const h = Math.floor(m/60), mi = Math.round(m%60); return `${h}h${pad(mi)}`; };
+const fmtMoney = n => (+n || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+const dayNames   = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
 function prettyDate(dateStr) {
-  const d = new Date(dateStr+'T00:00:00');
-  return d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).replace(/^\w/,c=>c.toUpperCase());
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }).replace(/^\w/, c => c.toUpperCase());
 }
 
 function getDayStatus(dateStr) {
   const day = S.days[dateStr];
   if (!day) return 'empty';
-  const hasWork   = day.work && (day.work.start || day.work.end);
-  const hasSport  = day.sport && (day.sport.done || day.sport.time > 0);
-  const hasWalk   = day.walk && day.walk.km > 0;
-  const hasExpenses = day.expenses && day.expenses.length > 0;
+  const hasWork       = day.work && (day.work.start || day.work.end);
+  const hasSport      = day.sport && (day.sport.done || day.sport.time > 0);
+  const hasWalk       = day.walk && day.walk.km > 0;
+  const hasExpenses   = day.expenses && day.expenses.length > 0;
   const hasActivities = day.activities && day.activities.length > 0;
-  const hasNotes  = day.notes && day.notes.trim();
-  const count = [hasWork,hasSport,hasWalk,hasExpenses,hasActivities,hasNotes].filter(Boolean).length;
+  const hasNotes      = day.notes && day.notes.trim();
+  const count = [hasWork, hasSport, hasWalk, hasExpenses, hasActivities, hasNotes].filter(Boolean).length;
   if (count >= 3) return 'complete';
   if (count >= 1) return 'partial';
   return 'empty';
@@ -118,7 +77,7 @@ function getDayStatus(dateStr) {
 /* ════════════════════════════════════════════
    THÈMES
 ════════════════════════════════════════════ */
-function setTheme(theme, save=true) {
+function setTheme(theme, save = true) {
   currentTheme = theme;
   document.body.setAttribute('data-theme', theme);
   document.querySelectorAll('.theme-opt').forEach(el => {
@@ -129,132 +88,624 @@ function setTheme(theme, save=true) {
     showToast('🎨 Thème appliqué');
   }
 }
-const THEMES = ['dark','light','blue','green'];
+const THEMES = ['dark', 'light', 'blue', 'green'];
 function cycleTheme() {
   const idx = THEMES.indexOf(currentTheme);
-  setTheme(THEMES[(idx+1)%THEMES.length]);
+  setTheme(THEMES[(idx + 1) % THEMES.length]);
 }
 
 /* ════════════════════════════════════════════
-   SIDEBAR / MENU
+   MENU LATÉRAL
 ════════════════════════════════════════════ */
 function toggleMenu() {
-  document.getElementById('sideMenu').classList.toggle('open');
-  document.getElementById('sideMenuBg').classList.toggle('show');
+  $('sideMenu').classList.toggle('open');
+  $('sideMenuBg').classList.toggle('show');
+}
+function closeMenu() {
+  $('sideMenu').classList.remove('open');
+  $('sideMenuBg').classList.remove('show');
 }
 
 /* ════════════════════════════════════════════
-   VIEW SWITCHING
+   CONFIGURATION FIREBASE
+════════════════════════════════════════════ */
+function getFirebaseConfig() {
+  const c = window.FIREBASE_CONFIG;
+  if (c && c.apiKey && c.projectId) return c;
+  try {
+    const stored = JSON.parse(localStorage.getItem('vieFirebaseConfig') || 'null');
+    if (stored && stored.apiKey && stored.projectId) return stored;
+  } catch (e) {}
+  // Migration : ancienne config du système de "code de synchronisation"
+  try {
+    const old = JSON.parse(localStorage.getItem('vieSyncConfig') || 'null');
+    if (old && old.config && old.config.apiKey && old.config.projectId) {
+      localStorage.setItem('vieFirebaseConfig', JSON.stringify(old.config));
+      return old.config;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function applyFbConfigText(text, errTargetId) {
+  let cfg;
+  try { cfg = JSON.parse(text.trim()); }
+  catch (e) {
+    const el = $(errTargetId);
+    if (el) { el.textContent = '❌ JSON invalide — copiez la configuration complète depuis la console Firebase.'; el.style.display = 'block'; }
+    else showToast('❌ JSON invalide');
+    return;
+  }
+  if (!cfg || !cfg.apiKey || !cfg.projectId) {
+    const el = $(errTargetId);
+    const msg = '❌ Configuration incomplète (apiKey et projectId requis).';
+    if (el) { el.textContent = msg; el.style.display = 'block'; }
+    else showToast(msg);
+    return;
+  }
+  localStorage.setItem('vieFirebaseConfig', JSON.stringify(cfg));
+  showToast('☁️ Configuration enregistrée — rechargement…');
+  setTimeout(() => location.reload(), 700);
+}
+function saveFbConfig()             { applyFbConfigText($('fbConfigInput').value, 'localError'); }
+function saveFbConfigFromSettings() { applyFbConfigText($('fbConfigSettings').value, null); }
+
+/* ════════════════════════════════════════════
+   AUTHENTIFICATION
+════════════════════════════════════════════ */
+const AUTH_ERRORS = {
+  'auth/invalid-email':          'Adresse e-mail invalide.',
+  'auth/user-disabled':          'Ce compte a été désactivé.',
+  'auth/user-not-found':         'Aucun compte trouvé avec cet e-mail.',
+  'auth/wrong-password':         'Mot de passe incorrect.',
+  'auth/invalid-credential':     'E-mail ou mot de passe incorrect.',
+  'auth/invalid-login-credentials': 'E-mail ou mot de passe incorrect.',
+  'auth/email-already-in-use':   'Un compte existe déjà avec cet e-mail. Utilisez l\'onglet Connexion.',
+  'auth/weak-password':          'Mot de passe trop faible (6 caractères minimum).',
+  'auth/too-many-requests':      'Trop de tentatives. Réessayez dans quelques minutes.',
+  'auth/network-request-failed': 'Erreur réseau. Vérifiez votre connexion.',
+  'auth/popup-blocked':          'Popup bloquée par le navigateur. Autorisez les popups pour ce site.',
+  'auth/operation-not-allowed':  'Méthode de connexion désactivée. Activez-la dans la console Firebase (Authentication → Sign-in method).',
+  'auth/unauthorized-domain':    'Domaine non autorisé. Ajoutez-le dans la console Firebase (Authentication → Settings → Authorized domains).',
+};
+const mapAuthError = e => AUTH_ERRORS[e && e.code] || (e && e.message) || 'Erreur inconnue';
+
+let authTab = 'login';
+
+function setAuthTab(tab) {
+  authTab = tab;
+  $('tabLogin').classList.toggle('active', tab === 'login');
+  $('tabSignup').classList.toggle('active', tab === 'signup');
+  $('signupNameWrap').style.display = tab === 'signup' ? '' : 'none';
+  $('forgotLink').style.display = tab === 'login' ? '' : 'none';
+  $('authSubmit').innerHTML = tab === 'login' ? 'Se connecter <span>→</span>' : 'Créer mon compte <span>→</span>';
+  $('authPassword').setAttribute('autocomplete', tab === 'login' ? 'current-password' : 'new-password');
+  clearAuthErrors();
+}
+
+function showAuthError(id, msg) {
+  const el = $(id);
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+function clearAuthErrors() {
+  ['authError', 'localError'].forEach(id => {
+    const el = $(id);
+    if (el) { el.textContent = ''; el.style.display = 'none'; }
+  });
+}
+
+async function submitAuth() {
+  clearAuthErrors();
+  const email = $('authEmail').value.trim();
+  const pw    = $('authPassword').value;
+  if (!email)            return showAuthError('authError', 'Entrez votre adresse e-mail.');
+  if (!pw || pw.length < 6) return showAuthError('authError', 'Mot de passe : 6 caractères minimum.');
+
+  const btn = $('authSubmit');
+  const oldHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = authTab === 'login' ? 'Connexion…' : 'Création du compte…';
+  try {
+    if (authTab === 'signup') {
+      const name = $('authName').value.trim();
+      if (!name) { showAuthError('authError', 'Entrez votre prénom.'); return; }
+      pendingSignupName = name;
+      const cred = await fbAuth.createUserWithEmailAndPassword(email, pw);
+      try { await cred.user.updateProfile({ displayName: name }); } catch (e) {}
+    } else {
+      await fbAuth.signInWithEmailAndPassword(email, pw);
+    }
+    // onAuthStateChanged prend le relais
+  } catch (e) {
+    showAuthError('authError', '❌ ' + mapAuthError(e));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = oldHTML;
+  }
+}
+
+async function googleSignIn() {
+  clearAuthErrors();
+  try {
+    await fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
+  } catch (e) {
+    if (e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request')) return;
+    showAuthError('authError', '❌ ' + mapAuthError(e));
+  }
+}
+
+async function forgotPassword() {
+  clearAuthErrors();
+  const email = $('authEmail').value.trim();
+  if (!email) return showAuthError('authError', 'Entrez votre e-mail ci-dessus, puis cliquez à nouveau sur « Mot de passe oublié ».');
+  try {
+    await fbAuth.sendPasswordResetEmail(email);
+    showToast('📧 E-mail de réinitialisation envoyé', 3200);
+  } catch (e) {
+    showAuthError('authError', '❌ ' + mapAuthError(e));
+  }
+}
+
+function togglePw() {
+  const i = $('authPassword');
+  i.type = i.type === 'password' ? 'text' : 'password';
+}
+
+function showLocalPanel() {
+  $('authCloud').style.display = 'none';
+  $('authLocal').style.display = '';
+  if (fbAuth) {
+    $('switchCloudLink').style.display = '';
+    $('fbSetupBox').style.display = 'none';
+  }
+  clearAuthErrors();
+}
+function showCloudPanel() {
+  $('authLocal').style.display = 'none';
+  $('authCloud').style.display = '';
+  clearAuthErrors();
+}
+
+function localLogin() {
+  clearAuthErrors();
+  const name = $('loginInput').value.trim();
+  if (!name) { showAuthError('localError', 'Entrez votre prénom pour commencer.'); $('loginInput').focus(); return; }
+  localStorage.setItem('vieUser', name);
+  localStorage.setItem('vieMode', 'local');
+  enterLocal(name);
+}
+
+/* ════════════════════════════════════════════
+   DÉMARRAGE / SESSIONS
+════════════════════════════════════════════ */
+function boot() {
+  const cfg = getFirebaseConfig();
+  if (cfg && typeof firebase !== 'undefined') {
+    try {
+      firebase.apps.length ? firebase.app() : firebase.initializeApp(cfg);
+      fbAuth = firebase.auth();
+      fbDb   = firebase.firestore();
+      // Cache hors-ligne Firestore (best effort)
+      try { fbDb.enablePersistence({ synchronizeTabs: true }).catch(() => {}); } catch (e) {}
+    } catch (e) {
+      console.error('Firebase init:', e);
+      fbAuth = null; fbDb = null;
+    }
+  }
+
+  setupAuthScreen();
+
+  if (fbAuth) {
+    let first = true;
+    fbAuth.onAuthStateChanged(user => {
+      const isFirst = first; first = false;
+      if (user) { enterCloud(user); return; }
+      // Pas de session cloud : reprendre une éventuelle session locale
+      const localName = localStorage.getItem('vieUser');
+      if (isFirst && localName && localStorage.getItem('vieMode') !== 'cloud') { enterLocal(localName); return; }
+      if (mode !== 'local') showAuth();
+    });
+    // Garde-fou : si l'auth ne répond pas (réseau), afficher l'écran de connexion
+    setTimeout(() => { if (!currentUser && $('bootScreen').style.display !== 'none') showAuth(); }, 6000);
+  } else {
+    const saved = localStorage.getItem('vieUser');
+    if (saved) enterLocal(saved); else showAuth();
+  }
+}
+
+function setupAuthScreen() {
+  const cloud = !!fbAuth;
+  $('authCloud').style.display = cloud ? '' : 'none';
+  $('authLocal').style.display = cloud ? 'none' : '';
+  $('fbSetupBox').style.display = cloud ? 'none' : '';
+  $('switchCloudLink').style.display = cloud ? '' : 'none';
+  $('authModeNote').textContent = cloud
+    ? '🔒 Vos données sont stockées de façon sécurisée dans votre projet Firebase et synchronisées entre vos appareils.'
+    : '💡 Mode local : vos données restent sur cet appareil. Configurez Firebase ci-dessus pour activer le compte cloud.';
+}
+
+function showAuth() {
+  $('bootScreen').style.display = 'none';
+  $('app').style.display = 'none';
+  $('authScreen').style.display = 'flex';
+}
+
+function enterLocal(name) {
+  mode = 'local';
+  currentUser = { name };
+  S = newState();
+  loadLocal('vie_data_' + name);
+  openApp();
+  setSyncUI('local');
+}
+
+function enterCloud(user) {
+  if (mode === 'cloud' && currentUser && currentUser.uid === user.uid) return; // déjà connecté
+  mode = 'cloud';
+  localStorage.setItem('vieMode', 'cloud');
+  currentUser = {
+    uid:   user.uid,
+    email: user.email || '',
+    name:  user.displayName || pendingSignupName || (user.email || '').split('@')[0] || 'Moi',
+  };
+  pendingSignupName = '';
+  S = newState();
+  loadLocal(cacheKey()); // cache hors-ligne → affichage instantané
+  openApp();
+  setSyncUI('syncing');
+  startCloudListener();
+}
+
+const cacheKey = () => 'vie_cloud_cache_' + (currentUser && currentUser.uid || '');
+
+function openApp() {
+  $('bootScreen').style.display = 'none';
+  $('authScreen').style.display = 'none';
+  $('app').style.display = 'flex';
+  // Réinitialiser le formulaire d'auth
+  const pw = $('authPassword'); if (pw) pw.value = '';
+  refreshIdentityUI();
+  setTheme(currentTheme, false);
+  const n = new Date();
+  calY = n.getFullYear(); calM = n.getMonth();
+  $('topbarDate').textContent = n.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+  sv('today');
+  checkBirthdays();
+}
+
+function refreshIdentityUI() {
+  if (!currentUser) return;
+  $('sidemenuAvatar').textContent = (currentUser.name || '?').charAt(0).toUpperCase();
+  $('sidemenuName').textContent   = currentUser.name || '—';
+  $('sidemenuRole').textContent   = mode === 'cloud' ? (currentUser.email || 'Compte cloud') : 'Mode local';
+}
+
+async function logout() {
+  const ok = await confirmDialog({
+    title: 'Se déconnecter ?',
+    message: mode === 'cloud'
+      ? 'Vos données restent sauvegardées dans le cloud.'
+      : 'Vos données restent enregistrées sur cet appareil.',
+    okLabel: 'Déconnexion', icon: '🚪',
+  });
+  if (!ok) return;
+  closeMenu();
+  stopCloudListener();
+  const wasCloud = mode === 'cloud';
+  mode = null; currentUser = null; S = newState();
+  if (wasCloud && fbAuth) {
+    localStorage.removeItem('vieMode');
+    try { await fbAuth.signOut(); } catch (e) { console.error(e); }
+  } else {
+    localStorage.removeItem('vieUser');
+    localStorage.removeItem('vieMode');
+  }
+  showAuth();
+}
+
+function goCreateAccount() {
+  closeMenu();
+  showAuth();
+  showCloudPanel();
+  setAuthTab('signup');
+}
+
+/* ════════════════════════════════════════════
+   PERSISTANCE — LOCAL + CLOUD
+════════════════════════════════════════════ */
+function loadLocal(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    S = {
+      ...newState(),
+      ...d,
+      goals:   { ...DEFAULT_GOALS, ...(d.goals || {}) },
+      profile: { ...(d.profile || {}) },
+    };
+  } catch (e) { console.error('loadLocal:', e); }
+}
+
+function persist() {
+  if (!currentUser) return;
+  try {
+    const key = mode === 'cloud' ? cacheKey() : 'vie_data_' + currentUser.name;
+    localStorage.setItem(key, JSON.stringify(S));
+  } catch (e) { console.error('persist:', e); }
+  if (mode === 'cloud') schedulePush();
+}
+
+const userDocRef = () => fbDb.collection('users').doc(currentUser.uid);
+
+function startCloudListener() {
+  stopCloudListener();
+  unsubData = userDocRef().onSnapshot(snap => {
+    if (snap.metadata.hasPendingWrites) return;       // notre propre écriture
+    if (!snap.exists) { firstCloudInit(); return; }   // premier appareil
+    const d = snap.data() || {};
+    if (d.updatedAt && d.updatedAt === lastPushedAt) { setSyncUI('ok'); return; }
+    applyRemote(d);
+    setSyncUI('ok');
+  }, err => {
+    console.error('Sync:', err);
+    setSyncUI('error', err.message);
+  });
+}
+function stopCloudListener() {
+  if (unsubData) { unsubData(); unsubData = null; }
+  clearTimeout(pushTimer);
+}
+
+/* Premier passage sur un compte vide : importer les éventuelles données locales */
+function firstCloudInit() {
+  const legacyName = localStorage.getItem('vieUser');
+  const legacyRaw  = legacyName ? localStorage.getItem('vie_data_' + legacyName) : null;
+  if (legacyRaw) {
+    try {
+      const d = JSON.parse(legacyRaw);
+      if (d && d.days && Object.keys(d.days).length) {
+        S = { ...newState(), ...d, goals: { ...DEFAULT_GOALS, ...(d.goals || {}) }, profile: { ...(d.profile || {}) } };
+        showToast('📦 Données locales importées dans votre compte', 3200);
+        renderActiveView();
+      }
+    } catch (e) {}
+  }
+  if (!S.profile) S.profile = {};
+  if (!S.profile.name) S.profile.name = currentUser.name;
+  pushNow();
+}
+
+function schedulePush() {
+  if (mode !== 'cloud' || !fbDb) return;
+  setSyncUI('syncing');
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushNow, 1200);
+}
+
+async function pushNow() {
+  if (mode !== 'cloud' || !fbDb || !currentUser || !currentUser.uid) return;
+  clearTimeout(pushTimer);
+  try {
+    const payload = JSON.parse(JSON.stringify({
+      days: S.days, planning: S.planning, birthdays: S.birthdays,
+      goals: S.goals, profile: S.profile || {},
+      updatedAt: Date.now(), appVersion: APP_VERSION,
+    }));
+    lastPushedAt = payload.updatedAt;
+    await userDocRef().set(payload);
+    setSyncUI('ok');
+  } catch (e) {
+    console.error('Push:', e);
+    setSyncUI('error', e.message);
+  }
+}
+
+function applyRemote(d) {
+  S = {
+    days:      d.days      || {},
+    planning:  d.planning  || {},
+    birthdays: d.birthdays || [],
+    goals:     { ...DEFAULT_GOALS, ...(d.goals || {}) },
+    profile:   d.profile   || {},
+  };
+  if (S.profile.name && currentUser) {
+    currentUser.name = S.profile.name;
+    refreshIdentityUI();
+  }
+  try { localStorage.setItem(cacheKey(), JSON.stringify(S)); } catch (e) {}
+  // Ne pas écraser une saisie en cours
+  const ae = document.activeElement;
+  const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') && $('view-today').contains(ae);
+  if (!typing) renderActiveView();
+}
+
+async function forcePush() {
+  if (mode !== 'cloud') return;
+  await pushNow();
+  showToast('⬆️ Données envoyées dans le cloud');
+}
+async function forcePull() {
+  if (mode !== 'cloud') return;
+  try {
+    setSyncUI('syncing');
+    const snap = await userDocRef().get();
+    if (snap.exists) { applyRemote(snap.data()); showToast('⬇️ Données récupérées'); }
+    else showToast('Aucune donnée cloud pour ce compte');
+    setSyncUI('ok');
+  } catch (e) {
+    setSyncUI('error', e.message);
+    showToast('❌ Erreur cloud');
+  }
+}
+
+function setSyncUI(state, detail) {
+  const map = {
+    local:   { dot: '',        txt: '📴 Mode local — données sur cet appareil' },
+    off:     { dot: '',        txt: '⚪ Cloud non configuré' },
+    syncing: { dot: 'syncing', txt: '🔄 Synchronisation…' },
+    ok:      { dot: 'ok',      txt: '🟢 Synchronisé' + (currentUser && currentUser.email ? ' — ' + currentUser.email : '') },
+    error:   { dot: 'err',     txt: '🔴 Erreur : ' + (detail || 'voir la console') },
+  };
+  const s = map[state] || map.off;
+  const dot = $('syncDot');      if (dot) dot.className = 'sync-dot ' + s.dot;
+  const bar = $('syncStatusBar');if (bar) bar.textContent = s.txt;
+  const sm  = $('sidemenuSync'); if (sm) sm.textContent = s.txt;
+  const w   = $('syncDotWrap');  if (w) w.title = s.txt;
+}
+
+function syncInfo() {
+  if (mode === 'cloud') { pushNow(); showToast('🔄 Synchronisation forcée'); }
+  else showToast('📴 Mode local — pas de synchronisation cloud');
+}
+
+/* ════════════════════════════════════════════
+   NAVIGATION ENTRE VUES
 ════════════════════════════════════════════ */
 const VIEW_TITLES = {
-  today:'Aujourd\'hui', calendar:'Calendrier', history:'Historique',
-  stats:'Statistiques', planning:'Planning', birthdays:'Anniversaires',
-  goals:'Objectifs', more:'Paramètres',
+  today: 'Aujourd\'hui', calendar: 'Calendrier', history: 'Historique',
+  stats: 'Statistiques', planning: 'Planning', birthdays: 'Anniversaires',
+  goals: 'Objectifs', more: 'Paramètres',
 };
-function sv(name, clickedEl) {
+
+function sv(name) {
+  activeView = name;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.bnav,.smitem').forEach(n => n.classList.remove('active'));
-  const v = document.getElementById('view-'+name);
+  const v = $('view-' + name);
   if (v) v.classList.add('active');
   document.querySelectorAll(`[data-v="${name}"]`).forEach(el => el.classList.add('active'));
-  document.getElementById('topbarTitle').textContent = VIEW_TITLES[name] || name;
-  // Lazy render
-  if (name==='calendar')  renderCalendar();
-  if (name==='history')   renderHistory();
-  if (name==='stats')     renderStats();
-  if (name==='planning')  renderPlanning();
-  if (name==='birthdays') renderBirthdays();
-  if (name==='goals')     renderGoals();
-  if (name==='today')     loadTodayView();
+  $('topbarTitle').textContent = VIEW_TITLES[name] || name;
+  renderActiveView();
+}
+
+function renderActiveView() {
+  switch (activeView) {
+    case 'today':     loadTodayView();   break;
+    case 'calendar':  renderCalendar();  break;
+    case 'history':   renderHistory();   break;
+    case 'stats':     renderStats();     break;
+    case 'planning':  renderPlanning();  break;
+    case 'birthdays': renderBirthdays(); break;
+    case 'goals':     renderGoals();     break;
+    case 'more':      renderSettings();  break;
+  }
 }
 
 /* ════════════════════════════════════════════
-   TODAY VIEW
+   VUE : AUJOURD'HUI
 ════════════════════════════════════════════ */
-function loadTodayView(dateStr) {
-  dateStr = dateStr || todayKey();
+function loadTodayView() {
+  const dateStr = todayKey();
   const day = S.days[dateStr] || {};
+
+  // Accueil
+  renderGreeting();
 
   // Sport
   const sport = day.sport || {};
-  document.getElementById('sportDone').checked = !!sport.done;
-  document.getElementById('sportTime').value   = sport.time || '';
-  document.getElementById('sportType').value   = sport.type || '';
+  $('sportDone').checked = !!sport.done;
+  $('sportTime').value   = sport.time || '';
+  $('sportType').value   = sport.type || '';
 
   // Marche
   const walk = day.walk || {};
-  document.getElementById('walkKm').value = walk.km || '';
-  updateSteps();
+  $('walkKm').value = walk.km || '';
+  updateSteps(false);
 
-  // Travail — pré-remplir depuis planning si vide
+  // Travail — pré-remplir depuis le planning si vide
   const work = day.work || {};
-  const dow = (new Date(dateStr+'T00:00:00').getDay() + 6) % 7; // 0=lun
+  const dow  = (new Date(dateStr + 'T00:00:00').getDay() + 6) % 7; // 0 = lundi
   const plan = S.planning[dow] || {};
-  document.getElementById('workStart').value = work.start || (plan.enabled ? plan.start||'' : '');
-  document.getElementById('workEnd').value   = work.end   || (plan.enabled ? plan.end||''   : '');
-  document.getElementById('workBreak').value = work.pause !== undefined ? work.pause : (plan.pause !== undefined ? plan.pause : 60);
-  calcWork();
+  $('workStart').value = work.start || (plan.enabled ? plan.start || '' : '');
+  $('workEnd').value   = work.end   || (plan.enabled ? plan.end   || '' : '');
+  $('workBreak').value = work.pause !== undefined ? work.pause : (plan.enabled && plan.pause !== undefined ? plan.pause : 60);
+  calcWork(false);
 
-  // Dépenses
+  // Dépenses / activités / notes
   renderExpenses(day.expenses || []);
-
-  // Activités
   renderActivities(day.activities || []);
-
-  // Notes
-  document.getElementById('notesText').value = day.notes || '';
-
-  // Mettre à jour topbar date
-  document.getElementById('topbarDate').textContent = new Date(dateStr+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+  $('notesText').value = day.notes || '';
 }
 
-function saveToday(manual=false) {
-  const dateStr = editingDate || todayKey();
+function renderGreeting() {
+  if (!currentUser) return;
+  const h = new Date().getHours();
+  const hello = h < 5 ? 'Bonne nuit' : h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  const emoji = h < 5 ? '🌙' : h < 12 ? '👋' : h < 18 ? '☀️' : '🌆';
+  $('greetEmoji').textContent = emoji;
+  $('greetTitle').textContent = `${hello}, ${currentUser.name} !`;
+  const st = getDayStatus(todayKey());
+  $('greetSub').textContent = st === 'empty'
+    ? 'Rien d\'enregistré pour l\'instant — c\'est parti ! ✍️'
+    : st === 'partial'
+      ? 'Bon début ! Continuez à remplir votre journée.'
+      : 'Belle journée bien remplie ! 💪';
+  $('greetStreak').textContent = '🔥 ' + calcStreak();
+}
+
+function calcStreak() {
+  let streak = 0;
+  const d = new Date();
+  if (getDayStatus(fmtDate(d)) === 'empty') d.setDate(d.getDate() - 1); // aujourd'hui pas encore rempli : ne casse pas la série
+  while (getDayStatus(fmtDate(d)) !== 'empty') {
+    streak++;
+    d.setDate(d.getDate() - 1);
+    if (streak > 3650) break; // garde-fou
+  }
+  return streak;
+}
+
+function saveToday(manual = false) {
+  const dateStr  = todayKey();
   const existing = S.days[dateStr] || {};
 
-  const expenses = existing.expenses || [];
-  const activities = existing.activities || [];
-
   const sport = {
-    done: document.getElementById('sportDone').checked,
-    time: parseFloat(document.getElementById('sportTime').value)||0,
-    type: document.getElementById('sportType').value.trim(),
+    done: $('sportDone').checked,
+    time: parseFloat($('sportTime').value) || 0,
+    type: $('sportType').value.trim(),
   };
-  const walkKm = parseFloat(document.getElementById('walkKm').value)||0;
-  const walk = { km: walkKm, steps: Math.round(walkKm * 1300) };
-  const work = {
-    start: document.getElementById('workStart').value,
-    end:   document.getElementById('workEnd').value,
-    pause: parseFloat(document.getElementById('workBreak').value)||0,
+  const walkKm = parseFloat($('walkKm').value) || 0;
+  const walk   = { km: walkKm, steps: Math.round(walkKm * STEPS_PER_KM) };
+  const work   = {
+    start: $('workStart').value,
+    end:   $('workEnd').value,
+    pause: parseFloat($('workBreak').value) || 0,
     total: calcWorkMinutes(),
   };
-  const notes = document.getElementById('notesText').value.trim();
+  const notes = $('notesText').value.trim();
 
-  S.days[dateStr] = { ...existing, sport, walk, work, notes, expenses, activities, updatedAt: Date.now() };
-  saveState();
+  S.days[dateStr] = {
+    ...existing,
+    sport, walk, work, notes,
+    expenses:   existing.expenses   || [],
+    activities: existing.activities || [],
+    updatedAt:  Date.now(),
+  };
+  persist();
+  renderGreeting();
   if (manual) { showToast('✅ Journée sauvegardée !'); confetti(); }
 }
 
-function updateSteps() {
-  const km = parseFloat(document.getElementById('walkKm').value)||0;
-  const steps = Math.round(km * 1300);
-  document.getElementById('stepsDisplay').textContent = steps > 0 ? steps.toLocaleString('fr-FR') + ' pas' : '— pas';
-  saveToday();
+function updateSteps(save = true) {
+  const km = parseFloat($('walkKm').value) || 0;
+  const steps = Math.round(km * STEPS_PER_KM);
+  $('stepsDisplay').textContent = steps > 0 ? steps.toLocaleString('fr-FR') + ' pas' : '— pas';
+  if (save) saveToday();
 }
 
 function calcWorkMinutes() {
-  const start = document.getElementById('workStart').value;
-  const end   = document.getElementById('workEnd').value;
-  const pause = parseFloat(document.getElementById('workBreak').value)||0;
+  const start = $('workStart').value;
+  const end   = $('workEnd').value;
+  const pause = parseFloat($('workBreak').value) || 0;
   if (!start || !end) return 0;
-  const total = parseT(end) - parseT(start) - pause;
-  return Math.max(0, total);
+  return Math.max(0, parseT(end) - parseT(start) - pause);
 }
 
-function calcWork() {
-  const total = calcWorkMinutes();
-  const dispEl = document.getElementById('workTotalDisp');
-  const resEl  = document.getElementById('workResult');
+function calcWork(save = true) {
+  const total  = calcWorkMinutes();
+  const dispEl = $('workTotalDisp');
+  const resEl  = $('workResult');
   if (total > 0) {
     dispEl.textContent = minToHM(total);
     resEl.textContent  = `⏱ ${minToHM(total)} de travail effectif`;
@@ -263,267 +714,434 @@ function calcWork() {
     dispEl.textContent = '— h';
     resEl.classList.remove('show');
   }
-  saveToday();
+  if (save) saveToday();
 }
 
-/* ── DÉPENSES ── */
+/* ── DÉPENSES (aujourd'hui) ── */
 function addExpense() {
-  const amt   = parseFloat(document.getElementById('expenseAmt').value);
-  const label = document.getElementById('expenseLabel').value.trim();
-  if (!amt || isNaN(amt)) { showToast('⚠️ Entrez un montant'); return; }
-  const dateStr = editingDate || todayKey();
-  if (!S.days[dateStr]) S.days[dateStr] = {};
-  if (!S.days[dateStr].expenses) S.days[dateStr].expenses = [];
-  S.days[dateStr].expenses.push({ id: Date.now(), amount: amt, label: label || 'Dépense', date: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) });
-  document.getElementById('expenseAmt').value   = '';
-  document.getElementById('expenseLabel').value = '';
-  saveState();
-  renderExpenses(S.days[dateStr].expenses);
-  showToast(`💰 +${fmtMoney(amt)} ajouté`);
+  const amtEl = $('expenseAmt'), lblEl = $('expenseLabel');
+  const amt = parseFloat(amtEl.value);
+  if (!amt || isNaN(amt) || amt <= 0) { showToast('⚠️ Entrez un montant valide'); amtEl.focus(); return; }
+  const dateStr = todayKey();
+  const day = S.days[dateStr] = S.days[dateStr] || {};
+  (day.expenses = day.expenses || []).push({
+    id: uid(),
+    amount: amt,
+    label: lblEl.value.trim() || 'Dépense',
+    time: new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }),
+  });
+  day.updatedAt = Date.now();
+  amtEl.value = ''; lblEl.value = '';
+  persist();
+  renderExpenses(day.expenses);
+  renderGreeting();
+  showToast('💰 +' + fmtMoney(amt) + ' ajouté');
 }
 
 function deleteExpense(id) {
-  const dateStr = editingDate || todayKey();
-  if (!S.days[dateStr]) return;
-  S.days[dateStr].expenses = (S.days[dateStr].expenses||[]).filter(e => e.id !== id);
-  saveState();
-  renderExpenses(S.days[dateStr].expenses);
+  const day = S.days[todayKey()];
+  if (!day) return;
+  day.expenses = (day.expenses || []).filter(e => String(e.id) !== String(id));
+  day.updatedAt = Date.now();
+  persist();
+  renderExpenses(day.expenses);
+  renderGreeting();
 }
 
 function renderExpenses(list) {
-  const el = document.getElementById('expenseList');
-  const total = list.reduce((s,e) => s+e.amount, 0);
-  document.getElementById('moneyTotalDisp').textContent = fmtMoney(total);
-  if (!list.length) { el.innerHTML=''; return; }
+  const el = $('expenseList');
+  const total = list.reduce((s, e) => s + (+e.amount || 0), 0);
+  $('moneyTotalDisp').textContent = fmtMoney(total);
+  if (!list.length) { el.innerHTML = ''; return; }
   el.innerHTML = list.map(e => `
     <div class="expense-item">
-      <span class="expense-item-label">${e.label}<span style="font-size:10px;color:var(--text3);margin-left:6px">${e.date||''}</span></span>
+      <span class="expense-item-label">${esc(e.label)}<span class="expense-item-time">${esc(e.time || e.date || '')}</span></span>
       <span class="expense-item-amount">${fmtMoney(e.amount)}</span>
-      <button class="expense-delete" onclick="deleteExpense(${e.id})" title="Supprimer">✕</button>
+      <button class="expense-delete" onclick="deleteExpense('${esc(e.id)}')" title="Supprimer" aria-label="Supprimer la dépense">✕</button>
     </div>`).join('');
 }
 
-/* ── ACTIVITÉS ── */
+/* ── ACTIVITÉS (aujourd'hui) ── */
 function addActivity() {
-  const txt = document.getElementById('activityInput').value.trim();
+  const input = $('activityInput');
+  const txt = input.value.trim();
   if (!txt) return;
-  const dateStr = editingDate || todayKey();
-  if (!S.days[dateStr]) S.days[dateStr] = {};
-  if (!S.days[dateStr].activities) S.days[dateStr].activities = [];
-  S.days[dateStr].activities.push({ id: Date.now(), text: txt });
-  document.getElementById('activityInput').value = '';
-  saveState();
-  renderActivities(S.days[dateStr].activities);
+  const dateStr = todayKey();
+  const day = S.days[dateStr] = S.days[dateStr] || {};
+  (day.activities = day.activities || []).push({ id: uid(), text: txt });
+  day.updatedAt = Date.now();
+  input.value = '';
+  persist();
+  renderActivities(day.activities);
+  renderGreeting();
 }
 
 function deleteActivity(id) {
-  const dateStr = editingDate || todayKey();
-  if (!S.days[dateStr]) return;
-  S.days[dateStr].activities = (S.days[dateStr].activities||[]).filter(a => a.id !== id);
-  saveState();
-  renderActivities(S.days[dateStr].activities);
+  const day = S.days[todayKey()];
+  if (!day) return;
+  day.activities = (day.activities || []).filter(a => String(a.id) !== String(id));
+  day.updatedAt = Date.now();
+  persist();
+  renderActivities(day.activities);
+  renderGreeting();
 }
 
 function renderActivities(list) {
-  const el = document.getElementById('activityList');
-  if (!list.length) { el.innerHTML=''; return; }
+  const el = $('activityList');
+  if (!list.length) { el.innerHTML = ''; return; }
   el.innerHTML = list.map(a => `
     <div class="activity-item">
-      <span class="activity-item-text">🏷 ${a.text}</span>
-      <button class="expense-delete" onclick="deleteActivity(${a.id})">✕</button>
+      <span class="activity-item-text">🏷 ${esc(a.text)}</span>
+      <button class="expense-delete" onclick="deleteActivity('${esc(a.id)}')" title="Supprimer" aria-label="Supprimer l'activité">✕</button>
     </div>`).join('');
 }
 
 /* ════════════════════════════════════════════
-   CALENDAR
+   CALENDRIER
 ════════════════════════════════════════════ */
 function renderCalendar() {
-  document.getElementById('calMonthLabel').textContent = `${monthNames[calM]} ${calY}`;
-  const grid = document.getElementById('calGrid');
+  $('calMonthLabel').textContent = `${monthNames[calM]} ${calY}`;
+  const grid = $('calGrid');
   const todayStr = todayKey();
   grid.innerHTML = '';
-  const firstDay = (new Date(calY,calM,1).getDay() + 6) % 7;
-  const dIM = new Date(calY,calM+1,0).getDate();
-  for (let i=0; i<firstDay; i++) {
+  const firstDay = (new Date(calY, calM, 1).getDay() + 6) % 7;
+  const dIM = new Date(calY, calM + 1, 0).getDate();
+  for (let i = 0; i < firstDay; i++) {
     const el = document.createElement('div');
     el.className = 'cal-cell cal-empty';
     grid.appendChild(el);
   }
-  for (let day=1; day<=dIM; day++) {
-    const ds = `${calY}-${pad(calM+1)}-${pad(day)}`;
+  for (let day = 1; day <= dIM; day++) {
+    const ds = `${calY}-${pad(calM + 1)}-${pad(day)}`;
     const status = getDayStatus(ds);
     const el = document.createElement('div');
-    el.className = 'cal-cell' + (ds===todayStr?' today':'');
-    if (status==='complete') el.classList.add('cal-green');
-    else if (status==='partial') el.classList.add('cal-orange');
+    el.className = 'cal-cell' + (ds === todayStr ? ' today' : '');
+    if (status === 'complete') el.classList.add('cal-green');
+    else if (status === 'partial') el.classList.add('cal-orange');
     else if (ds < todayStr) el.classList.add('cal-red');
-    el.innerHTML = `${day}${status!=='empty'?'<div class="cal-dot"></div>':''}`;
+    el.innerHTML = `${day}${status !== 'empty' ? '<div class="cal-dot"></div>' : ''}`;
     el.onclick = () => showDayDetail(ds);
     grid.appendChild(el);
   }
 }
+
 function calNav(dir) {
   calM += dir;
-  if (calM>11){calM=0;calY++;}
-  if (calM<0){calM=11;calY--;}
+  if (calM > 11) { calM = 0; calY++; }
+  if (calM < 0)  { calM = 11; calY--; }
   renderCalendar();
 }
 function calGoToday() {
-  const n=new Date(); calY=n.getFullYear(); calM=n.getMonth();
+  const n = new Date();
+  calY = n.getFullYear(); calM = n.getMonth();
   renderCalendar();
 }
 
 function showDayDetail(ds) {
-  const detail = document.getElementById('dayDetailCard');
-  document.getElementById('dayDetailTitle').textContent = prettyDate(ds);
-  document.getElementById('dayDetailContent').innerHTML = buildDayDetailHTML(ds);
+  const detail = $('dayDetailCard');
+  $('dayDetailTitle').textContent = prettyDate(ds);
+  $('dayDetailContent').innerHTML = buildDayDetailHTML(ds);
   detail.style.display = '';
   detail.dataset.date = ds;
-  detail.scrollIntoView({behavior:'smooth'});
+  detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hideDayDetail() {
+  $('dayDetailCard').style.display = 'none';
 }
 
 function buildDayDetailHTML(ds) {
   const day = S.days[ds];
-  if (!day) return '<p style="color:var(--text3);font-size:13px;padding:8px 0">Aucune donnée pour ce jour.</p>';
+  if (!day) return '<p style="color:var(--text3);font-size:13px;padding:8px 0">Aucune donnée pour ce jour. Cliquez sur « Modifier » pour en ajouter.</p>';
   const rows = [];
   if (day.sport && (day.sport.done || day.sport.time)) {
-    rows.push(`<div class="detail-row"><span class="detail-icon">🏃</span><span class="detail-label">Sport</span><span class="detail-value">${day.sport.done?'✅':'❌'} ${day.sport.time?day.sport.time+'min':''} ${day.sport.type||''}</span></div>`);
+    rows.push(`<div class="detail-row"><span class="detail-icon">🏃</span><span class="detail-label">Sport</span><span class="detail-value">${day.sport.done ? '✅' : '❌'} ${day.sport.time ? day.sport.time + ' min' : ''} ${esc(day.sport.type || '')}</span></div>`);
   }
   if (day.walk && day.walk.km) {
-    rows.push(`<div class="detail-row"><span class="detail-icon">🚶</span><span class="detail-label">Marche</span><span class="detail-value">${day.walk.km} km · ${(day.walk.steps||0).toLocaleString('fr-FR')} pas</span></div>`);
+    rows.push(`<div class="detail-row"><span class="detail-icon">🚶</span><span class="detail-label">Marche</span><span class="detail-value">${day.walk.km} km · ${(day.walk.steps || 0).toLocaleString('fr-FR')} pas</span></div>`);
   }
   if (day.work && (day.work.start || day.work.total)) {
-    rows.push(`<div class="detail-row"><span class="detail-icon">💼</span><span class="detail-label">Travail</span><span class="detail-value">${day.work.start||'?'}→${day.work.end||'?'} · <strong>${minToHM(day.work.total||0)}</strong></span></div>`);
+    rows.push(`<div class="detail-row"><span class="detail-icon">💼</span><span class="detail-label">Travail</span><span class="detail-value">${esc(day.work.start || '?')} → ${esc(day.work.end || '?')} · <strong>${minToHM(day.work.total || 0)}</strong></span></div>`);
   }
   if (day.expenses && day.expenses.length) {
-    const total = day.expenses.reduce((s,e)=>s+e.amount,0);
-    rows.push(`<div class="detail-row"><span class="detail-icon">💰</span><span class="detail-label">Dépenses</span><span class="detail-value">${fmtMoney(total)} (${day.expenses.length} entrée${day.expenses.length>1?'s':''})</span></div>`);
-    day.expenses.forEach(e => rows.push(`<div class="detail-row" style="padding-left:38px"><span class="detail-label" style="font-size:11px">${e.label}</span><span class="detail-value" style="color:var(--money)">${fmtMoney(e.amount)}</span></div>`));
+    const total = day.expenses.reduce((s, e) => s + (+e.amount || 0), 0);
+    rows.push(`<div class="detail-row"><span class="detail-icon">💰</span><span class="detail-label">Dépenses</span><span class="detail-value">${fmtMoney(total)} (${day.expenses.length} entrée${day.expenses.length > 1 ? 's' : ''})</span></div>`);
+    day.expenses.forEach(e => rows.push(`<div class="detail-row" style="padding-left:38px"><span class="detail-label" style="font-size:11px">${esc(e.label)}</span><span class="detail-value" style="color:var(--money)">${fmtMoney(e.amount)}</span></div>`));
   }
   if (day.activities && day.activities.length) {
-    rows.push(`<div class="detail-row"><span class="detail-icon">🏷</span><span class="detail-label">Activités</span><span class="detail-value">${day.activities.map(a=>a.text).join(', ')}</span></div>`);
+    rows.push(`<div class="detail-row"><span class="detail-icon">🏷</span><span class="detail-label">Activités</span><span class="detail-value">${day.activities.map(a => esc(a.text)).join(', ')}</span></div>`);
   }
   if (day.notes) {
-    rows.push(`<div class="detail-row"><span class="detail-icon">📝</span><span class="detail-label">Notes</span><span class="detail-value">${day.notes}</span></div>`);
+    rows.push(`<div class="detail-row"><span class="detail-icon">📝</span><span class="detail-label">Notes</span><span class="detail-value">${esc(day.notes)}</span></div>`);
   }
   return rows.length ? rows.join('') : '<p style="color:var(--text3);font-size:13px;padding:8px 0">Journée enregistrée mais sans détails.</p>';
 }
 
 function editDayFromDetail() {
-  const ds = document.getElementById('dayDetailCard').dataset.date;
-  openEditDayModal(ds);
+  openEditDayModal($('dayDetailCard').dataset.date);
+}
+function deleteDayFromDetail() {
+  deleteDay($('dayDetailCard').dataset.date);
+}
+
+/* Suppression d'une journée complète (détail, historique, modale) */
+async function deleteDay(ds) {
+  if (!ds || !S.days[ds]) { showToast('Rien à supprimer pour ce jour'); return false; }
+  const ok = await confirmDialog({
+    title: 'Supprimer cette journée ?',
+    message: prettyDate(ds) + '\nToutes les données de ce jour (sport, travail, dépenses, notes…) seront définitivement supprimées.',
+    okLabel: 'Supprimer', icon: '🗑',
+  });
+  if (!ok) return false;
+  delete S.days[ds];
+  persist();
+  const detail = $('dayDetailCard');
+  if (detail.dataset.date === ds) detail.style.display = 'none';
+  renderActiveView();
+  showToast('🗑 Journée supprimée');
+  return true;
 }
 
 /* ════════════════════════════════════════════
-   EDIT DAY MODAL
+   MODALE DE MODIFICATION D'UN JOUR
+   (brouillon : rien n'est enregistré avant « Sauvegarder »)
 ════════════════════════════════════════════ */
+let editingDate = null;
+let editDraft   = null;
+
 function openEditDayModal(ds) {
   editingDate = ds;
-  const day = S.days[ds] || {};
-  document.getElementById('editModalTitle').textContent = `✏️ ${prettyDate(ds)}`;
+  const src = S.days[ds] || {};
+  editDraft = JSON.parse(JSON.stringify(src));
+  editDraft.sport      = editDraft.sport      || {};
+  editDraft.walk       = editDraft.walk       || {};
+  editDraft.work       = editDraft.work       || {};
+  editDraft.expenses   = editDraft.expenses   || [];
+  editDraft.activities = editDraft.activities || [];
 
-  // Remplir le contenu de la modale avec les mêmes champs que today
-  document.getElementById('editModalContent').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <!-- Sport -->
-      <div style="background:var(--surface2);border-radius:12px;padding:12px">
-        <div style="font-weight:700;font-size:13px;color:var(--text1);margin-bottom:10px">🏃 Sport</div>
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <label class="toggle-check"><input type="checkbox" id="esSportDone" ${day.sport?.done?'checked':''}><span class="toggle-slider"></span></label>
-          <span style="font-size:13px;color:var(--text2)">Fait</span>
-        </div>
-        <div class="input-row">
-          <div class="input-group"><label>Durée (min)</label><input type="number" id="esSportTime" value="${day.sport?.time||''}" placeholder="30"></div>
-          <div class="input-group"><label>Type</label><input type="text" id="esSportType" value="${day.sport?.type||''}" placeholder="Course…"></div>
-        </div>
-      </div>
-      <!-- Marche -->
-      <div style="background:var(--surface2);border-radius:12px;padding:12px">
-        <div style="font-weight:700;font-size:13px;color:var(--text1);margin-bottom:10px">🚶 Marche</div>
-        <div class="input-row">
-          <div class="input-group"><label>Distance (km)</label><input type="number" id="esWalkKm" value="${day.walk?.km||''}" step="0.1" placeholder="2.5"></div>
-          <div class="input-group"><label>Pas estimés</label><div class="steps-display" id="esStepsDisp">${day.walk?.steps?day.walk.steps.toLocaleString('fr-FR')+' pas':'— pas'}</div></div>
-        </div>
-      </div>
-      <!-- Travail -->
-      <div style="background:var(--surface2);border-radius:12px;padding:12px">
-        <div style="font-weight:700;font-size:13px;color:var(--text1);margin-bottom:10px">💼 Travail</div>
-        <div class="input-row" style="grid-template-columns:1fr 1fr 1fr">
-          <div class="input-group"><label>Début</label><input type="time" id="esWorkStart" value="${day.work?.start||''}"></div>
-          <div class="input-group"><label>Fin</label><input type="time" id="esWorkEnd" value="${day.work?.end||''}"></div>
-          <div class="input-group"><label>Pause (min)</label><input type="number" id="esWorkBreak" value="${day.work?.pause??60}" min="0"></div>
-        </div>
-      </div>
-      <!-- Notes -->
-      <div style="background:var(--surface2);border-radius:12px;padding:12px">
-        <div style="font-weight:700;font-size:13px;color:var(--text1);margin-bottom:10px">📝 Notes</div>
-        <textarea id="esNotes" rows="3" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 12px;color:var(--text1);outline:none;font-size:13px" placeholder="Notes…">${day.notes||''}</textarea>
-      </div>
-    </div>`;
+  $('editModalTitle').textContent = '✏️ ' + prettyDate(ds);
+  $('editModalContent').innerHTML = buildEditModalHTML();
 
-  // Listener pour les pas
-  document.getElementById('esWalkKm').addEventListener('input', () => {
-    const km = parseFloat(document.getElementById('esWalkKm').value)||0;
-    document.getElementById('esStepsDisp').textContent = km>0 ? Math.round(km*1300).toLocaleString('fr-FR')+' pas' : '— pas';
+  renderEditExpenses();
+  renderEditActivities();
+  updateEditWorkTotal();
+
+  $('esWalkKm').addEventListener('input', () => {
+    const km = parseFloat($('esWalkKm').value) || 0;
+    $('esStepsDisp').textContent = km > 0 ? Math.round(km * STEPS_PER_KM).toLocaleString('fr-FR') + ' pas' : '— pas';
   });
+  ['esWorkStart', 'esWorkEnd', 'esWorkBreak'].forEach(id => $(id).addEventListener('input', updateEditWorkTotal));
+  $('eeLabel').addEventListener('keydown', e => { if (e.key === 'Enter') editAddExpense(); });
+  $('eeActivity').addEventListener('keydown', e => { if (e.key === 'Enter') editAddActivity(); });
 
-  document.getElementById('editModal').classList.remove('hidden');
+  $('editModal').classList.remove('hidden');
+}
+
+function buildEditModalHTML() {
+  const d = editDraft;
+  return `
+  <div class="edit-sections">
+    <div class="esec">
+      <div class="esec-title">🏃 Sport</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <label class="toggle-check"><input type="checkbox" id="esSportDone" ${d.sport.done ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        <span style="font-size:13px;color:var(--text2)">Fait</span>
+      </div>
+      <div class="input-row">
+        <div class="input-group"><label>Durée (min)</label><input type="number" id="esSportTime" value="${esc(d.sport.time || '')}" min="0" placeholder="30"></div>
+        <div class="input-group"><label>Type</label><input type="text" id="esSportType" value="${esc(d.sport.type || '')}" maxlength="60" placeholder="Course…"></div>
+      </div>
+    </div>
+
+    <div class="esec">
+      <div class="esec-title">🚶 Marche</div>
+      <div class="input-row">
+        <div class="input-group"><label>Distance (km)</label><input type="number" id="esWalkKm" value="${esc(d.walk.km || '')}" min="0" step="0.1" placeholder="2.5"></div>
+        <div class="input-group"><label>Pas estimés</label><div class="steps-display" id="esStepsDisp">${d.walk.steps ? d.walk.steps.toLocaleString('fr-FR') + ' pas' : '— pas'}</div></div>
+      </div>
+    </div>
+
+    <div class="esec">
+      <div class="esec-title">💼 Travail</div>
+      <div class="input-row triple">
+        <div class="input-group"><label>Début</label><input type="time" id="esWorkStart" value="${esc(d.work.start || '')}"></div>
+        <div class="input-group"><label>Fin</label><input type="time" id="esWorkEnd" value="${esc(d.work.end || '')}"></div>
+        <div class="input-group"><label>Pause (min)</label><input type="number" id="esWorkBreak" value="${esc(d.work.pause !== undefined ? d.work.pause : 60)}" min="0"></div>
+      </div>
+      <div class="work-total-preview" id="esWorkTotal">—</div>
+    </div>
+
+    <div class="esec">
+      <div class="esec-title">💰 Dépenses <span class="esec-total" id="eeTotal">0,00 €</span></div>
+      <div id="editExpenseList" class="expense-list" style="margin-bottom:10px"></div>
+      <div class="expense-add-row" style="margin-bottom:0">
+        <input type="number" id="eeAmt" min="0" step="0.01" placeholder="Montant (€)" inputmode="decimal">
+        <input type="text" id="eeLabel" placeholder="Description…" maxlength="80">
+        <button class="btn btn-primary btn-sm" onclick="editAddExpense()" aria-label="Ajouter la dépense">+</button>
+      </div>
+    </div>
+
+    <div class="esec">
+      <div class="esec-title">🏷 Activités</div>
+      <div id="editActivityList" class="activity-list"></div>
+      <div class="activity-add-row" style="margin-bottom:0">
+        <input type="text" id="eeActivity" placeholder="Voyage, sortie…" maxlength="120">
+        <button class="btn btn-primary btn-sm" onclick="editAddActivity()" aria-label="Ajouter l'activité">+</button>
+      </div>
+    </div>
+
+    <div class="esec">
+      <div class="esec-title">📝 Notes</div>
+      <textarea id="esNotes" rows="3" placeholder="Notes…">${esc(d.notes || '')}</textarea>
+    </div>
+  </div>`;
+}
+
+function updateEditWorkTotal() {
+  const s = $('esWorkStart').value, e = $('esWorkEnd').value;
+  const p = parseFloat($('esWorkBreak').value) || 0;
+  const total = s && e ? Math.max(0, parseT(e) - parseT(s) - p) : 0;
+  $('esWorkTotal').textContent = total > 0 ? `⏱ ${minToHM(total)} de travail effectif` : '—';
+}
+
+/* Dépenses dans la modale (sur le brouillon) */
+function renderEditExpenses() {
+  const list = editDraft.expenses;
+  const total = list.reduce((s, e) => s + (+e.amount || 0), 0);
+  $('eeTotal').textContent = fmtMoney(total);
+  $('editExpenseList').innerHTML = list.length ? list.map(e => `
+    <div class="expense-item">
+      <span class="expense-item-label">${esc(e.label)}</span>
+      <span class="expense-item-amount">${fmtMoney(e.amount)}</span>
+      <button class="expense-delete" onclick="editDeleteExpense('${esc(e.id)}')" title="Supprimer" aria-label="Supprimer la dépense">✕</button>
+    </div>`).join('') : '<div class="empty-mini">Aucune dépense ce jour-là</div>';
+}
+function editAddExpense() {
+  const amt = parseFloat($('eeAmt').value);
+  if (!amt || isNaN(amt) || amt <= 0) { showToast('⚠️ Entrez un montant valide'); return; }
+  editDraft.expenses.push({ id: uid(), amount: amt, label: $('eeLabel').value.trim() || 'Dépense' });
+  $('eeAmt').value = ''; $('eeLabel').value = '';
+  renderEditExpenses();
+}
+function editDeleteExpense(id) {
+  editDraft.expenses = editDraft.expenses.filter(e => String(e.id) !== String(id));
+  renderEditExpenses();
+}
+
+/* Activités dans la modale (sur le brouillon) */
+function renderEditActivities() {
+  const list = editDraft.activities;
+  $('editActivityList').innerHTML = list.length ? list.map(a => `
+    <div class="activity-item">
+      <span class="activity-item-text">🏷 ${esc(a.text)}</span>
+      <button class="expense-delete" onclick="editDeleteActivity('${esc(a.id)}')" title="Supprimer" aria-label="Supprimer l'activité">✕</button>
+    </div>`).join('') : '<div class="empty-mini">Aucune activité ce jour-là</div>';
+}
+function editAddActivity() {
+  const txt = $('eeActivity').value.trim();
+  if (!txt) return;
+  editDraft.activities.push({ id: uid(), text: txt });
+  $('eeActivity').value = '';
+  renderEditActivities();
+}
+function editDeleteActivity(id) {
+  editDraft.activities = editDraft.activities.filter(a => String(a.id) !== String(id));
+  renderEditActivities();
 }
 
 function closeEditModal() {
   editingDate = null;
-  document.getElementById('editModal').classList.add('hidden');
+  editDraft = null;
+  $('editModal').classList.add('hidden');
 }
 
 function saveEditModal() {
   const ds = editingDate;
-  if (!ds) return;
-  const existing = S.days[ds] || {};
-  const walkKm = parseFloat(document.getElementById('esWalkKm').value)||0;
-  const workStart = document.getElementById('esWorkStart').value;
-  const workEnd   = document.getElementById('esWorkEnd').value;
-  const workBreak = parseFloat(document.getElementById('esWorkBreak').value)||0;
-  const workTotal = workStart&&workEnd ? Math.max(0,parseT(workEnd)-parseT(workStart)-workBreak) : 0;
+  if (!ds || !editDraft) return;
+  const walkKm = parseFloat($('esWalkKm').value) || 0;
+  const ws = $('esWorkStart').value, we = $('esWorkEnd').value;
+  const wb = parseFloat($('esWorkBreak').value) || 0;
   S.days[ds] = {
-    ...existing,
-    sport: { done:document.getElementById('esSportDone').checked, time:parseFloat(document.getElementById('esSportTime').value)||0, type:document.getElementById('esSportType').value.trim() },
-    walk: { km:walkKm, steps:Math.round(walkKm*1300) },
-    work: { start:workStart, end:workEnd, pause:workBreak, total:workTotal },
-    notes: document.getElementById('esNotes').value.trim(),
+    ...editDraft,
+    sport: {
+      done: $('esSportDone').checked,
+      time: parseFloat($('esSportTime').value) || 0,
+      type: $('esSportType').value.trim(),
+    },
+    walk: { km: walkKm, steps: Math.round(walkKm * STEPS_PER_KM) },
+    work: { start: ws, end: we, pause: wb, total: ws && we ? Math.max(0, parseT(we) - parseT(ws) - wb) : 0 },
+    notes: $('esNotes').value.trim(),
+    expenses: editDraft.expenses,
+    activities: editDraft.activities,
     updatedAt: Date.now(),
   };
-  saveState();
+  persist();
   closeEditModal();
-  renderCalendar();
-  showDayDetail(ds);
+  renderActiveView();
+  const detail = $('dayDetailCard');
+  if (detail.style.display !== 'none' && detail.dataset.date === ds) showDayDetail(ds);
   showToast('✅ Journée modifiée');
-  if (ds === todayKey()) loadTodayView();
+}
+
+async function deleteEditDay() {
+  const ds = editingDate;
+  if (!ds) return;
+  if (!S.days[ds]) { closeEditModal(); return; } // jour jamais enregistré : rien à supprimer
+  const ok = await deleteDay(ds);
+  if (ok) closeEditModal();
 }
 
 /* ════════════════════════════════════════════
-   HISTORY
+   HISTORIQUE
 ════════════════════════════════════════════ */
+function clearHistFilters() {
+  $('histMonthFilter').value = '';
+  $('histSearch').value = '';
+  renderHistory();
+}
+
+function dayMatchesSearch(d, q) {
+  const hay = [
+    d.notes || '',
+    (d.sport && d.sport.type) || '',
+    ...(d.activities || []).map(a => a.text || ''),
+    ...(d.expenses || []).map(e => e.label || ''),
+  ].join(' ').toLowerCase();
+  return hay.includes(q);
+}
+
 function renderHistory() {
-  const el = document.getElementById('historyList');
-  const f  = document.getElementById('histMonthFilter').value;
+  const el = $('historyList');
+  const monthF = $('histMonthFilter').value;
+  const q = ($('histSearch').value || '').trim().toLowerCase();
   const entries = Object.entries(S.days)
-    .filter(([k,v]) => (!f || k.startsWith(f)) && v && Object.keys(v).length>1)
-    .sort(([a],[b]) => b.localeCompare(a));
-  if (!entries.length) { el.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text3)">Aucune journée enregistrée</div>`; return; }
-  el.innerHTML = entries.map(([ds,day]) => {
+    .filter(([k, v]) => v && getDayStatus(k) !== 'empty')
+    .filter(([k]) => !monthF || k.startsWith(monthF))
+    .filter(([, v]) => !q || dayMatchesSearch(v, q))
+    .sort(([a], [b]) => b.localeCompare(a));
+
+  if (!entries.length) {
+    el.innerHTML = `<div class="empty-state"><span class="empty-emoji">📭</span>${q || monthF ? 'Aucune journée ne correspond à ce filtre.' : 'Aucune journée enregistrée pour l\'instant.'}</div>`;
+    return;
+  }
+  el.innerHTML = entries.map(([ds, day]) => {
     const status = getDayStatus(ds);
-    const dotColor = status==='complete'?'var(--neon)':status==='partial'?'var(--gold)':'var(--red)';
-    const d = new Date(ds+'T00:00:00');
+    const dotColor = status === 'complete' ? 'var(--neon)' : status === 'partial' ? 'var(--gold)' : 'var(--red)';
+    const d = new Date(ds + 'T00:00:00');
     const chips = [];
-    if (day.sport?.done || day.sport?.time) chips.push(`<span class="hist-chip chip-sport">🏃 ${day.sport.time||0}min</span>`);
-    if (day.walk?.km)    chips.push(`<span class="hist-chip chip-walk">🚶 ${day.walk.km}km</span>`);
-    if (day.work?.total) chips.push(`<span class="hist-chip chip-work">💼 ${minToHM(day.work.total)}</span>`);
-    if (day.expenses?.length) chips.push(`<span class="hist-chip chip-money">💰 ${fmtMoney(day.expenses.reduce((s,e)=>s+e.amount,0))}</span>`);
-    return `<div class="hist-item" onclick="sv('calendar',null);showDayDetail('${ds}')">
+    if (day.sport && (day.sport.done || day.sport.time)) chips.push(`<span class="hist-chip chip-sport">🏃 ${day.sport.time || 0} min</span>`);
+    if (day.walk && day.walk.km)       chips.push(`<span class="hist-chip chip-walk">🚶 ${day.walk.km} km</span>`);
+    if (day.work && day.work.total)    chips.push(`<span class="hist-chip chip-work">💼 ${minToHM(day.work.total)}</span>`);
+    if (day.expenses && day.expenses.length) chips.push(`<span class="hist-chip chip-money">💰 ${fmtMoney(day.expenses.reduce((s, e) => s + (+e.amount || 0), 0))}</span>`);
+    if (day.activities && day.activities.length) chips.push(`<span class="hist-chip chip-sport" style="background:rgba(167,139,250,.1);color:var(--note)">🏷 ${day.activities.length}</span>`);
+    return `<div class="hist-item" onclick="sv('calendar');showDayDetail('${ds}')">
       <div class="hist-item-header">
         <div class="hist-dot" style="background:${dotColor}"></div>
-        <div class="hist-date">${d.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long'})}</div>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditDayModal('${ds}')" style="padding:4px 9px;font-size:11px">✏️</button>
+        <div class="hist-date">${d.toLocaleDateString('fr-FR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' })}</div>
+        <div class="hist-actions">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditDayModal('${ds}')" title="Modifier" aria-label="Modifier">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDay('${ds}')" title="Supprimer" aria-label="Supprimer">🗑</button>
+        </div>
       </div>
       <div class="hist-chips">${chips.join('')}</div>
     </div>`;
@@ -531,7 +1149,7 @@ function renderHistory() {
 }
 
 /* ════════════════════════════════════════════
-   STATS
+   STATISTIQUES
 ════════════════════════════════════════════ */
 function setStatsPeriod(p, btn) {
   statsPeriod = p;
@@ -543,16 +1161,15 @@ function setStatsPeriod(p, btn) {
 function getStatsDays() {
   const now = new Date(), entries = [];
   if (statsPeriod === 'week') {
-    const dow = (now.getDay()+6)%7;
-    for (let i=0; i<7; i++) { const d=new Date(now); d.setDate(now.getDate()-dow+i); entries.push(fmtDate(d)); }
+    const dow = (now.getDay() + 6) % 7;
+    for (let i = 0; i < 7; i++) { const d = new Date(now); d.setDate(now.getDate() - dow + i); entries.push(fmtDate(d)); }
   } else if (statsPeriod === 'month') {
-    const days = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-    for (let i=1; i<=days; i++) entries.push(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(i)}`);
+    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    for (let i = 1; i <= days; i++) entries.push(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(i)}`);
   } else {
-    for (let m=0; m<12; m++) {
-      const d = new Date(now.getFullYear(),m,1);
-      const days = new Date(now.getFullYear(),m+1,0).getDate();
-      for (let i=1; i<=days; i++) { const dd=new Date(now.getFullYear(),m,i); if(dd<=now) entries.push(fmtDate(dd)); }
+    for (let m = 0; m < 12; m++) {
+      const days = new Date(now.getFullYear(), m + 1, 0).getDate();
+      for (let i = 1; i <= days; i++) { const dd = new Date(now.getFullYear(), m, i); if (dd <= now) entries.push(fmtDate(dd)); }
     }
   }
   return entries;
@@ -560,50 +1177,48 @@ function getStatsDays() {
 
 function renderStats() {
   const days = getStatsDays();
-  let totalSport=0, totalKm=0, totalSteps=0, totalMoney=0, totalWork=0, sportDays=0;
-  const sportByDay=[], workByDay=[], moneyByDay=[];
+  let totalSport = 0, totalKm = 0, totalSteps = 0, totalMoney = 0, totalWork = 0, sportDays = 0;
+  const sportByDay = [], workByDay = [], moneyByDay = [];
 
   days.forEach(ds => {
     const day = S.days[ds] || {};
-    const s = day.sport?.time||0;
-    const km = day.walk?.km||0;
-    const steps = day.walk?.steps||0;
-    const money = (day.expenses||[]).reduce((a,e)=>a+e.amount,0);
-    const work = day.work?.total||0;
+    const s     = (day.sport && day.sport.time) || 0;
+    const km    = (day.walk && day.walk.km) || 0;
+    const steps = (day.walk && day.walk.steps) || 0;
+    const money = (day.expenses || []).reduce((a, e) => a + (+e.amount || 0), 0);
+    const work  = (day.work && day.work.total) || 0;
     totalSport += s; totalKm += km; totalSteps += steps; totalMoney += money; totalWork += work;
-    if (s>0) sportDays++;
-    sportByDay.push({date:ds,val:s});
-    workByDay.push({date:ds,val:work/60});
-    moneyByDay.push({date:ds,val:money});
+    if (s > 0 || (day.sport && day.sport.done)) sportDays++;
+    sportByDay.push({ date: ds, val: s });
+    workByDay.push({ date: ds, val: work / 60 });
+    moneyByDay.push({ date: ds, val: money });
   });
 
-  const g = S.goals;
-  const periodLabel = statsPeriod==='week'?'cette semaine':statsPeriod==='month'?'ce mois':'cette année';
+  const periodLabel = statsPeriod === 'week' ? 'cette semaine' : statsPeriod === 'month' ? 'ce mois-ci' : 'cette année';
 
-  document.getElementById('statsGrid').innerHTML = `
-    <div class="stat-tile"><div class="stat-tile-icon">🏃</div><div class="stat-tile-label">Sport</div><div class="stat-tile-val sv-sport">${totalSport}min</div><div class="stat-tile-sub">${sportDays} séances ${periodLabel}</div></div>
-    <div class="stat-tile"><div class="stat-tile-icon">🚶</div><div class="stat-tile-label">Marche</div><div class="stat-tile-val sv-walk">${totalKm.toFixed(1)}km</div><div class="stat-tile-sub">${totalSteps.toLocaleString('fr-FR')} pas</div></div>
+  $('statsGrid').innerHTML = `
+    <div class="stat-tile"><div class="stat-tile-icon">🏃</div><div class="stat-tile-label">Sport</div><div class="stat-tile-val sv-sport">${totalSport} min</div><div class="stat-tile-sub">${sportDays} séance${sportDays > 1 ? 's' : ''} ${periodLabel}</div></div>
+    <div class="stat-tile"><div class="stat-tile-icon">🚶</div><div class="stat-tile-label">Marche</div><div class="stat-tile-val sv-walk">${totalKm.toFixed(1)} km</div><div class="stat-tile-sub">${totalSteps.toLocaleString('fr-FR')} pas</div></div>
     <div class="stat-tile"><div class="stat-tile-icon">💼</div><div class="stat-tile-label">Travail</div><div class="stat-tile-val sv-work">${minToHM(totalWork)}</div><div class="stat-tile-sub">${periodLabel}</div></div>
     <div class="stat-tile"><div class="stat-tile-icon">💰</div><div class="stat-tile-label">Dépenses</div><div class="stat-tile-val sv-money">${fmtMoney(totalMoney)}</div><div class="stat-tile-sub">${periodLabel}</div></div>
   `;
 
-  // Charts
-  const maxSport = Math.max(...sportByDay.map(d=>d.val), 1);
-  const maxWork  = Math.max(...workByDay.map(d=>d.val), 1);
-  const maxMoney = Math.max(...moneyByDay.map(d=>d.val), 1);
-  const show = (data) => statsPeriod==='year' ? data.filter((_,i,a)=>i%Math.ceil(a.length/12)===0) : data;
+  const maxSport = Math.max(...sportByDay.map(d => d.val), 1);
+  const maxWork  = Math.max(...workByDay.map(d => d.val), 1);
+  const maxMoney = Math.max(...moneyByDay.map(d => d.val), 1);
+  const show = data => statsPeriod === 'year' ? data.filter((_, i, a) => i % Math.ceil(a.length / 12) === 0) : data;
 
-  document.getElementById('statsCharts').innerHTML = `
-    ${renderMiniChart('Sport (min)', show(sportByDay), maxSport, '#34D399')}
-    ${renderMiniChart('Travail (h)', show(workByDay), maxWork, '#FBBF24')}
-    ${renderMiniChart('Dépenses (€)', show(moneyByDay), maxMoney, '#F472B6')}
+  $('statsCharts').innerHTML = `
+    ${renderMiniChart('Sport (min)', show(sportByDay), maxSport, 'var(--sport)')}
+    ${renderMiniChart('Travail (h)', show(workByDay), maxWork, 'var(--work)')}
+    ${renderMiniChart('Dépenses (€)', show(moneyByDay), maxMoney, 'var(--money)')}
   `;
 }
 
 function renderMiniChart(title, data, maxV, color) {
   const bars = data.map(d => {
-    const pct = maxV>0 ? Math.max((d.val/maxV)*100, d.val>0?4:0) : 0;
-    const lbl = new Date(d.date+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+    const pct = maxV > 0 ? Math.max((d.val / maxV) * 100, d.val > 0 ? 4 : 0) : 0;
+    const lbl = new Date(d.date + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
     return `<div class="mini-bar-col"><div class="mini-bar" style="height:${pct}%;background:${color};opacity:.85"></div><div class="mini-bar-lbl">${lbl}</div></div>`;
   }).join('');
   return `<div class="chart-card"><div class="chart-title">${title}</div><div class="mini-bar-chart">${bars}</div></div>`;
@@ -613,43 +1228,43 @@ function renderMiniChart(title, data, maxV, color) {
    PLANNING
 ════════════════════════════════════════════ */
 function renderPlanning() {
-  const el = document.getElementById('planningGrid');
-  el.innerHTML = dayNames.map((name,i) => {
+  const el = $('planningGrid');
+  el.innerHTML = dayNames.map((name, i) => {
     const p = S.planning[i] || {};
     return `<div class="plan-day-card">
       <div class="plan-day-name">
         <span>${name}</span>
         <label class="toggle-check plan-day-toggle">
-          <input type="checkbox" id="plen_${i}" ${p.enabled?'checked':''} onchange="togglePlanDay(${i})">
+          <input type="checkbox" id="plen_${i}" ${p.enabled ? 'checked' : ''} onchange="togglePlanDay(${i})">
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <div class="plan-day-fields" id="planFields_${i}" style="${p.enabled?'':'opacity:.4;pointer-events:none'}">
-        <div class="plan-field"><label>Début</label><input type="time" id="plstart_${i}" value="${p.start||''}"></div>
-        <div class="plan-field"><label>Fin</label><input type="time" id="plend_${i}" value="${p.end||''}"></div>
-        <div class="plan-field"><label>Pause (min)</label><input type="number" id="plbreak_${i}" value="${p.pause??60}" min="0"></div>
+      <div class="plan-day-fields" id="planFields_${i}" style="${p.enabled ? '' : 'opacity:.4;pointer-events:none'}">
+        <div class="plan-field"><label>Début</label><input type="time" id="plstart_${i}" value="${esc(p.start || '')}"></div>
+        <div class="plan-field"><label>Fin</label><input type="time" id="plend_${i}" value="${esc(p.end || '')}"></div>
+        <div class="plan-field"><label>Pause (min)</label><input type="number" id="plbreak_${i}" value="${esc(p.pause !== undefined ? p.pause : 60)}" min="0"></div>
       </div>
     </div>`;
   }).join('');
 }
 
 function togglePlanDay(i) {
-  const enabled = document.getElementById(`plen_${i}`).checked;
-  const fields  = document.getElementById(`planFields_${i}`);
+  const enabled = $(`plen_${i}`).checked;
+  const fields  = $(`planFields_${i}`);
   fields.style.opacity = enabled ? '1' : '.4';
   fields.style.pointerEvents = enabled ? '' : 'none';
 }
 
 function savePlanning() {
-  for (let i=0; i<7; i++) {
+  for (let i = 0; i < 7; i++) {
     S.planning[i] = {
-      enabled: document.getElementById(`plen_${i}`)?.checked || false,
-      start:   document.getElementById(`plstart_${i}`)?.value || '',
-      end:     document.getElementById(`plend_${i}`)?.value || '',
-      pause:   parseFloat(document.getElementById(`plbreak_${i}`)?.value)||60,
+      enabled: ($(`plen_${i}`) && $(`plen_${i}`).checked) || false,
+      start:   ($(`plstart_${i}`) && $(`plstart_${i}`).value) || '',
+      end:     ($(`plend_${i}`) && $(`plend_${i}`).value) || '',
+      pause:   parseFloat($(`plbreak_${i}`) && $(`plbreak_${i}`).value) || 60,
     };
   }
-  saveState();
+  persist();
   showToast('📆 Planning sauvegardé !');
 }
 
@@ -657,117 +1272,115 @@ function savePlanning() {
    ANNIVERSAIRES
 ════════════════════════════════════════════ */
 function addBirthday() {
-  const name = document.getElementById('bdayName').value.trim();
-  const date = document.getElementById('bdayDate').value;
+  const name = $('bdayName').value.trim();
+  const date = $('bdayDate').value;
   if (!name || !date) { showToast('⚠️ Remplissez le nom et la date'); return; }
-  S.birthdays.push({ id: Date.now(), name, date });
-  document.getElementById('bdayName').value = '';
-  document.getElementById('bdayDate').value = '';
-  saveState();
+  S.birthdays.push({ id: uid(), name, date });
+  $('bdayName').value = '';
+  $('bdayDate').value = '';
+  persist();
   renderBirthdays();
   showToast(`🎂 ${name} ajouté !`);
 }
 
-function deleteBirthday(id) {
-  S.birthdays = S.birthdays.filter(b => b.id !== id);
-  saveState();
+async function deleteBirthday(id) {
+  const b = S.birthdays.find(x => String(x.id) === String(id));
+  const ok = await confirmDialog({
+    title: 'Supprimer cet anniversaire ?',
+    message: b ? b.name : '',
+    okLabel: 'Supprimer', icon: '🗑',
+  });
+  if (!ok) return;
+  S.birthdays = S.birthdays.filter(x => String(x.id) !== String(id));
+  persist();
   renderBirthdays();
+  showToast('🗑 Anniversaire supprimé');
 }
 
 function renderBirthdays() {
-  const el = document.getElementById('bdayList');
-  if (!S.birthdays.length) { el.innerHTML='<div style="text-align:center;padding:30px;color:var(--text3)">Aucun anniversaire enregistré</div>'; return; }
-  const today = new Date();
-  const todayMD = `${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
-  const sorted = [...S.birthdays].sort((a,b) => {
-    const amd = a.date.slice(5), bmd = b.date.slice(5);
-    return amd.localeCompare(bmd);
-  });
-  el.innerHTML = sorted.map(b => {
-    const bdate = new Date(b.date);
-    const bMD = b.date.slice(5);
-    const isToday = bMD === todayMD;
-    const age = today.getFullYear() - bdate.getFullYear();
-    // Jours restants
-    const nextBday = new Date(today.getFullYear(), bdate.getMonth(), bdate.getDate());
-    if (nextBday < today) nextBday.setFullYear(today.getFullYear()+1);
-    const daysLeft = Math.ceil((nextBday - today) / (1000*60*60*24));
-    return `<div class="bday-item ${isToday?'bday-today':''}">
-      <div class="bday-emoji-big">${isToday?'🎂🎉':'🎂'}</div>
+  const el = $('bdayList');
+  if (!S.birthdays.length) {
+    el.innerHTML = '<div class="empty-state"><span class="empty-emoji">🎂</span>Aucun anniversaire enregistré.<br>Ajoutez vos proches pour ne plus jamais oublier !</div>';
+    return;
+  }
+  const t0 = new Date();
+  const today = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate());
+  const withNext = S.birthdays.map(b => {
+    const bdate = new Date(b.date + 'T00:00:00');
+    let next = new Date(today.getFullYear(), bdate.getMonth(), bdate.getDate());
+    if (next < today) next.setFullYear(today.getFullYear() + 1);
+    const daysLeft = Math.round((next - today) / 864e5);
+    const turning = next.getFullYear() - bdate.getFullYear();
+    return { ...b, bdate, daysLeft, turning };
+  }).sort((a, b) => a.daysLeft - b.daysLeft);
+
+  el.innerHTML = withNext.map(b => {
+    const isToday = b.daysLeft === 0;
+    const countdown = isToday
+      ? `🎉 ${b.turning} an${b.turning > 1 ? 's' : ''} aujourd'hui !`
+      : b.daysLeft === 1
+        ? `Demain — fêtera ${b.turning} an${b.turning > 1 ? 's' : ''}`
+        : `Dans ${b.daysLeft} jours — fêtera ${b.turning} an${b.turning > 1 ? 's' : ''}`;
+    return `<div class="bday-item ${isToday ? 'bday-today' : ''}">
+      <div class="bday-emoji-big">${isToday ? '🎂🎉' : '🎂'}</div>
       <div class="bday-info">
-        <div class="bday-name">${b.name} ${isToday?'🥳':''}</div>
-        <div class="bday-date-text">${bdate.toLocaleDateString('fr-FR',{day:'numeric',month:'long'})} · ${age} ans</div>
-        <div class="bday-countdown">${isToday?'🎉 C\'est aujourd\'hui !':daysLeft===0?'Demain !':'Dans '+daysLeft+' jour'+(daysLeft>1?'s':'')}</div>
+        <div class="bday-name">${esc(b.name)} ${isToday ? '🥳' : ''}</div>
+        <div class="bday-date-text">${b.bdate.toLocaleDateString('fr-FR', { day:'numeric', month:'long', year:'numeric' })}</div>
+        <div class="bday-countdown">${countdown}</div>
       </div>
       <div class="bday-actions">
-        <button class="btn btn-danger btn-sm" onclick="deleteBirthday(${b.id})">🗑</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBirthday('${esc(b.id)}')" aria-label="Supprimer">🗑</button>
       </div>
     </div>`;
   }).join('');
 }
 
+const identityKey = () => mode === 'cloud' ? (currentUser && currentUser.uid) : (currentUser && currentUser.name);
+
 function checkBirthdays() {
   const today = new Date();
-  const todayMD = `${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
-  const todayBdays = S.birthdays.filter(b => b.date.slice(5) === todayMD);
+  const todayMD = `${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  const todayBdays = S.birthdays.filter(b => (b.date || '').slice(5) === todayMD);
   if (!todayBdays.length) return;
-  const lastShown = localStorage.getItem('bdayShown_' + currentUser);
-  if (lastShown === todayKey()) return;
-  localStorage.setItem('bdayShown_' + currentUser, todayKey());
+  const flagKey = 'bdayShown_' + identityKey();
+  if (localStorage.getItem(flagKey) === todayKey()) return;
+  localStorage.setItem(flagKey, todayKey());
   showBdayPopup(todayBdays);
 }
 
 function showBdayPopup(bdays) {
   const today = new Date();
-  document.getElementById('bdayNames').innerHTML = bdays.map(b => {
-    const age = today.getFullYear() - new Date(b.date).getFullYear();
-    return `<div>🎂 ${b.name} — ${age} ans !</div>`;
+  $('bdayNames').innerHTML = bdays.map(b => {
+    const age = today.getFullYear() - new Date(b.date + 'T00:00:00').getFullYear();
+    return `<div>🎂 ${esc(b.name)} — ${age} an${age > 1 ? 's' : ''} !</div>`;
   }).join('');
-  const popup = document.getElementById('birthdayPopup');
+  const popup = $('birthdayPopup');
+  popup.style.display = '';
   popup.classList.remove('hidden');
   spawnBdayConfetti();
 }
 
 function closeBdayPopup() {
-  const popup = document.getElementById('birthdayPopup');
-  if (popup) {
-    popup.classList.add('hidden');
-    popup.style.display = 'none'; // sécurité anti-bug
-  }
+  $('birthdayPopup').classList.add('hidden');
 }
 
-// Fermer en cliquant sur le fond
-const popup = document.getElementById('birthdayPopup');
-
-popup.addEventListener('click', (e) => {
-  if (e.target.id === "birthdayPopup") {
-    closeBdayPopup();
-  }
-});
-
-// Fermer avec Echap
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeBdayPopup();
-});
-
-// Tester le popup (bouton démonstration)
 function testBdayPopup() {
-  // Réinitialiser le flag pour permettre le re-test
-  localStorage.removeItem('bdayShown_' + currentUser);
-  showBdayPopup([{ name: 'Marie (test)', date: '1990-' + pad(new Date().getMonth()+1) + '-' + pad(new Date().getDate()) }]);
+  localStorage.removeItem('bdayShown_' + identityKey());
+  const n = new Date();
+  showBdayPopup([{ name: currentUser ? currentUser.name + ' (démo)' : 'Marie (démo)', date: `1990-${pad(n.getMonth() + 1)}-${pad(n.getDate())}` }]);
 }
 
 function spawnBdayConfetti() {
-  const colors = ['#FBBF24','#F472B6','#34D399','#60A5FA','#F87171','#A78BFA'];
-  const container = document.getElementById('popupConfetti');
-  for (let i=0; i<30; i++) {
+  const colors = ['#FBBF24', '#F472B6', '#34D399', '#60A5FA', '#F87171', '#A78BFA'];
+  const container = $('popupConfetti');
+  for (let i = 0; i < 30; i++) {
     setTimeout(() => {
       const p = document.createElement('div');
       p.className = 'cfp';
       p.style.cssText = `left:${Math.random()*100}%;top:${Math.random()*40}%;width:${6+Math.random()*7}px;height:${6+Math.random()*7}px;background:${colors[Math.floor(Math.random()*colors.length)]};animation-delay:${Math.random()*.5}s;animation-duration:${1+Math.random()*.8}s;position:absolute`;
       container.appendChild(p);
-      setTimeout(()=>p.remove(),2000);
-    }, i*60);
+      setTimeout(() => p.remove(), 2000);
+    }, i * 60);
   }
 }
 
@@ -776,302 +1389,347 @@ function spawnBdayConfetti() {
 ════════════════════════════════════════════ */
 function saveGoals() {
   S.goals = {
-    steps:  parseFloat(document.getElementById('goalSteps').value)||10000,
-    sport:  parseFloat(document.getElementById('goalSport').value)||150,
-    budget: parseFloat(document.getElementById('goalBudget').value)||500,
-    work:   parseFloat(document.getElementById('goalWork').value)||35,
+    steps:  parseFloat($('goalSteps').value)  || DEFAULT_GOALS.steps,
+    sport:  parseFloat($('goalSport').value)  || DEFAULT_GOALS.sport,
+    budget: parseFloat($('goalBudget').value) || DEFAULT_GOALS.budget,
+    work:   parseFloat($('goalWork').value)   || DEFAULT_GOALS.work,
   };
-  saveState();
+  persist();
   showToast('🎯 Objectifs enregistrés !');
   renderGoals();
 }
 
 function renderGoals() {
-  // Pré-remplir les champs
-  document.getElementById('goalSteps').value  = S.goals.steps;
-  document.getElementById('goalSport').value  = S.goals.sport;
-  document.getElementById('goalBudget').value = S.goals.budget;
-  document.getElementById('goalWork').value   = S.goals.work;
+  $('goalSteps').value  = S.goals.steps;
+  $('goalSport').value  = S.goals.sport;
+  $('goalBudget').value = S.goals.budget;
+  $('goalWork').value   = S.goals.work;
 
-  // Calculer les données de la semaine en cours
-  const now=new Date(), dow=(now.getDay()+6)%7;
-  let weekSteps=0, weekSport=0, weekMoney=0, weekWork=0;
-  for (let i=0;i<7;i++) {
-    const d=new Date(now); d.setDate(now.getDate()-dow+i);
-    const k=fmtDate(d), day=S.days[k]||{};
-    weekSteps += day.walk?.steps||0;
-    weekSport += day.sport?.time||0;
-    weekMoney += (day.expenses||[]).reduce((s,e)=>s+e.amount,0);
-    weekWork  += (day.work?.total||0)/60;
+  const now = new Date(), dow = (now.getDay() + 6) % 7;
+  let weekSteps = 0, weekSport = 0, weekMoney = 0, weekWork = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now); d.setDate(now.getDate() - dow + i);
+    const day = S.days[fmtDate(d)] || {};
+    weekSteps += (day.walk && day.walk.steps) || 0;
+    weekSport += (day.sport && day.sport.time) || 0;
+    weekMoney += (day.expenses || []).reduce((s, e) => s + (+e.amount || 0), 0);
+    weekWork  += ((day.work && day.work.total) || 0) / 60;
   }
 
   const goals = [
-    { name:'👟 Pas/jour (moy.)', val:Math.round(weekSteps/7), target:S.goals.steps, unit:'pas', color:'var(--walk)' },
-    { name:'🏃 Sport semaine', val:weekSport, target:S.goals.sport, unit:'min', color:'var(--sport)' },
-    { name:'💰 Budget semaine', val:weekMoney, target:S.goals.budget/4, unit:'€', color:'var(--money)', inverse:true },
-    { name:'💼 Travail semaine', val:weekWork, target:S.goals.work, unit:'h', color:'var(--work)' },
+    { name: '👟 Pas / jour (moyenne)', val: Math.round(weekSteps / 7), target: S.goals.steps, unit: 'pas', color: 'var(--walk)' },
+    { name: '🏃 Sport / semaine', val: weekSport, target: S.goals.sport, unit: 'min', color: 'var(--sport)' },
+    { name: '💰 Budget / semaine', val: weekMoney, target: S.goals.budget / 4, unit: '€', color: 'var(--money)', inverse: true },
+    { name: '💼 Travail / semaine', val: weekWork, target: S.goals.work, unit: 'h', color: 'var(--work)' },
   ];
 
-  document.getElementById('goalsProgress').innerHTML = goals.map(g => {
-    const pct = g.target>0 ? Math.min(100,(g.val/g.target)*100) : 0;
-    const ok = g.inverse ? pct<=100 : pct>=80;
+  $('goalsProgress').innerHTML = goals.map(g => {
+    const pct = g.target > 0 ? Math.min(100, (g.val / g.target) * 100) : 0;
+    const ok = g.inverse ? pct <= 100 : pct >= 80;
     const displayVal = Number.isInteger(g.val) ? g.val.toLocaleString('fr-FR') : g.val.toFixed(1);
+    const displayTarget = Number.isInteger(g.target) ? g.target.toLocaleString('fr-FR') : g.target.toFixed(1);
     return `<div class="goal-progress">
       <div class="goal-header">
         <div class="goal-name">${g.name}</div>
-        <div class="goal-pct" style="color:${ok?'var(--neon)':'var(--gold)'}">${Math.round(pct)}%</div>
+        <div class="goal-pct" style="color:${ok ? 'var(--neon)' : 'var(--gold)'}">${Math.round(pct)}%</div>
       </div>
       <div class="goal-bar-bg"><div class="goal-bar-fill" style="width:${pct}%;background:${g.color}"></div></div>
-      <div class="goal-sub">${displayVal} ${g.unit} / ${g.target} ${g.unit}</div>
+      <div class="goal-sub">${displayVal} ${g.unit} / ${displayTarget} ${g.unit}</div>
     </div>`;
   }).join('');
+}
+
+/* ════════════════════════════════════════════
+   PARAMÈTRES
+════════════════════════════════════════════ */
+function renderSettings() {
+  document.querySelectorAll('.theme-opt').forEach(el => el.classList.toggle('active', el.dataset.theme === currentTheme));
+  $('cloudTools').style.display = mode === 'cloud' ? '' : 'none';
+
+  const box = $('accountBox');
+  if (!currentUser) { box.innerHTML = ''; return; }
+
+  if (mode === 'cloud') {
+    box.innerHTML = `
+      <div class="account-row">
+        <div class="sidemenu-avatar" style="margin:0;width:42px;height:42px;font-size:17px">${esc((currentUser.name || '?').charAt(0).toUpperCase())}</div>
+        <div style="flex:1;min-width:0">
+          <div class="account-name">${esc(currentUser.name)}</div>
+          <div class="account-email">${esc(currentUser.email || 'Compte cloud')}</div>
+        </div>
+      </div>
+      <div class="input-group"><label>Prénom affiché</label><input type="text" id="profileNameInput" value="${esc(currentUser.name)}" maxlength="40"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="saveProfileName()">💾 Enregistrer</button>
+        <button class="btn btn-ghost btn-sm" onclick="changePassword()">🔑 Changer le mot de passe</button>
+        <button class="btn btn-ghost btn-sm" onclick="logout()">🚪 Déconnexion</button>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="deleteAccount()" style="align-self:flex-start">❌ Supprimer mon compte</button>`;
+  } else {
+    box.innerHTML = `
+      <div class="account-name">👤 ${esc(currentUser.name || '')} — mode local</div>
+      <p class="view-desc">Vos données sont enregistrées uniquement sur cet appareil.${fbAuth ? ' Créez un compte pour les synchroniser dans le cloud (vos données locales seront importées automatiquement).' : ' Configurez Firebase pour activer le compte cloud et la synchronisation multi-appareils.'}</p>
+      ${fbAuth
+        ? '<button class="btn btn-primary btn-sm" onclick="goCreateAccount()" style="align-self:flex-start">☁️ Créer un compte / me connecter</button>'
+        : `<textarea id="fbConfigSettings" rows="5" spellcheck="false" placeholder='{ "apiKey": "AIza…", "authDomain": "…", "projectId": "…" }'></textarea>
+           <button class="btn btn-primary btn-sm" onclick="saveFbConfigFromSettings()" style="align-self:flex-start">☁️ Enregistrer la config Firebase</button>`}
+      <button class="btn btn-ghost btn-sm" onclick="logout()" style="align-self:flex-start">🚪 Déconnexion</button>`;
+  }
+}
+
+async function saveProfileName() {
+  const name = $('profileNameInput').value.trim();
+  if (!name) { showToast('⚠️ Entrez un prénom'); return; }
+  currentUser.name = name;
+  S.profile = S.profile || {};
+  S.profile.name = name;
+  if (fbAuth && fbAuth.currentUser) {
+    try { await fbAuth.currentUser.updateProfile({ displayName: name }); } catch (e) {}
+  }
+  persist();
+  refreshIdentityUI();
+  renderSettings();
+  showToast('✅ Prénom mis à jour');
+}
+
+async function changePassword() {
+  if (!fbAuth || !currentUser || !currentUser.email) return;
+  const ok = await confirmDialog({
+    title: 'Changer le mot de passe ?',
+    message: 'Un e-mail de réinitialisation sera envoyé à ' + currentUser.email + '.',
+    okLabel: 'Envoyer l\'e-mail', icon: '🔑', danger: false,
+  });
+  if (!ok) return;
+  try {
+    await fbAuth.sendPasswordResetEmail(currentUser.email);
+    showToast('📧 E-mail de réinitialisation envoyé', 3200);
+  } catch (e) {
+    showToast('❌ ' + mapAuthError(e), 3500);
+  }
+}
+
+async function deleteAccount() {
+  if (mode !== 'cloud' || !fbAuth || !fbAuth.currentUser) return;
+  const ok1 = await confirmDialog({
+    title: 'Supprimer votre compte ?',
+    message: 'Toutes vos données cloud seront définitivement effacées. Cette action est irréversible.',
+    okLabel: 'Continuer', icon: '⚠️',
+  });
+  if (!ok1) return;
+  const ok2 = await confirmDialog({
+    title: 'Dernière confirmation',
+    message: 'Supprimer définitivement le compte ' + (currentUser.email || '') + ' et toutes ses données ?',
+    okLabel: 'Tout supprimer', icon: '❌',
+  });
+  if (!ok2) return;
+  try {
+    stopCloudListener();
+    await userDocRef().delete();
+    try { localStorage.removeItem(cacheKey()); } catch (e) {}
+    await fbAuth.currentUser.delete();
+    localStorage.removeItem('vieMode');
+    showToast('Compte supprimé. Au revoir 👋', 3200);
+    // onAuthStateChanged ramène à l'écran de connexion
+  } catch (e) {
+    if (e && e.code === 'auth/requires-recent-login') {
+      showToast('🔒 Par sécurité, reconnectez-vous puis réessayez la suppression.', 4200);
+      startCloudListener(); // le compte existe toujours : re-synchroniser
+    } else {
+      showToast('❌ ' + (e && e.message || 'Erreur'), 3500);
+      startCloudListener();
+    }
+  }
 }
 
 /* ════════════════════════════════════════════
    EXPORT / IMPORT
 ════════════════════════════════════════════ */
 function exportJSON() {
-  const data = JSON.stringify({...S, user:currentUser, exportDate:new Date().toISOString()}, null, 2);
+  const data = JSON.stringify({ ...S, user: currentUser && currentUser.name, exportDate: new Date().toISOString(), appVersion: APP_VERSION }, null, 2);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([data],{type:'application/json'}));
-  a.download = `suivi-vie-${currentUser}-${todayKey()}.json`;
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  a.download = `suivi-vie-${(currentUser && currentUser.name || 'export').replace(/[^\w-]/g, '_')}-${todayKey()}.json`;
   a.click();
-  showToast('🗄 Backup téléchargé');
+  URL.revokeObjectURL(a.href);
+  showToast('🗄 Sauvegarde téléchargée');
 }
 
 function exportCSV() {
-  const hdr = 'Date,Sport fait,Sport min,Sport type,Marche km,Pas,Travail début,Travail fin,Pause min,Travail total,Dépenses €,Notes\n';
-  const rows = Object.entries(S.days).sort(([a],[b])=>a.localeCompare(b)).map(([ds,d]) => {
-    const money = (d.expenses||[]).reduce((s,e)=>s+e.amount,0);
-    return `${ds},${d.sport?.done?'Oui':'Non'},${d.sport?.time||0},"${d.sport?.type||''}",${d.walk?.km||0},${d.walk?.steps||0},${d.work?.start||''},${d.work?.end||''},${d.work?.pause||0},${(d.work?.total||0)/60},"${money.toFixed(2)}","${(d.notes||'').replace(/"/g,"'")}"`;
+  const csvQuote = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const hdr = 'Date,Sport fait,Sport min,Sport type,Marche km,Pas,Travail début,Travail fin,Pause min,Travail total (h),Dépenses €,Activités,Notes\n';
+  const rows = Object.entries(S.days).sort(([a], [b]) => a.localeCompare(b)).map(([ds, d]) => {
+    const money = (d.expenses || []).reduce((s, e) => s + (+e.amount || 0), 0);
+    const acts  = (d.activities || []).map(a => a.text).join(' | ');
+    return [
+      ds,
+      d.sport && d.sport.done ? 'Oui' : 'Non',
+      (d.sport && d.sport.time) || 0,
+      csvQuote((d.sport && d.sport.type) || ''),
+      (d.walk && d.walk.km) || 0,
+      (d.walk && d.walk.steps) || 0,
+      (d.work && d.work.start) || '',
+      (d.work && d.work.end) || '',
+      (d.work && d.work.pause) || 0,
+      (((d.work && d.work.total) || 0) / 60).toFixed(2),
+      money.toFixed(2),
+      csvQuote(acts),
+      csvQuote(d.notes || ''),
+    ].join(',');
   }).join('\n');
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob(['\ufeff'+hdr+rows],{type:'text/csv'}));
-  a.download = `suivi-vie-${currentUser}-${todayKey()}.csv`;
+  a.href = URL.createObjectURL(new Blob(['﻿' + hdr + rows], { type: 'text/csv;charset=utf-8' }));
+  a.download = `suivi-vie-${(currentUser && currentUser.name || 'export').replace(/[^\w-]/g, '_')}-${todayKey()}.csv`;
   a.click();
+  URL.revokeObjectURL(a.href);
   showToast('📊 CSV téléchargé');
 }
 
 function importJSON(e) {
-  const f = e.target.files[0]; if (!f) return;
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
   const r = new FileReader();
-  r.onload = ev => {
+  r.onload = async ev => {
     try {
       const imp = JSON.parse(ev.target.result);
-      if (!confirm('Remplacer toutes vos données actuelles ?')) return;
+      if (!imp || typeof imp !== 'object') throw new Error('format');
+      const ok = await confirmDialog({
+        title: 'Importer ce fichier ?',
+        message: 'Vos données actuelles seront remplacées par celles du fichier de sauvegarde.',
+        okLabel: 'Importer', icon: '📥',
+      });
+      if (!ok) return;
       if (imp.days)      S.days      = imp.days;
       if (imp.planning)  S.planning  = imp.planning;
       if (imp.birthdays) S.birthdays = imp.birthdays;
-      if (imp.goals)     S.goals     = {...S.goals,...imp.goals};
-      saveState();
-      initApp();
+      if (imp.goals)     S.goals     = { ...DEFAULT_GOALS, ...imp.goals };
+      persist();
+      renderActiveView();
       showToast('✅ Données importées !');
-    } catch(err) { showToast('❌ Fichier invalide'); }
+    } catch (err) {
+      showToast('❌ Fichier invalide');
+    }
   };
   r.readAsText(f);
 }
 
 /* ════════════════════════════════════════════
-   RESET
+   RÉINITIALISATION
 ════════════════════════════════════════════ */
-function resetTodayConfirm() {
-  if (!confirm('Supprimer les données d\'aujourd\'hui ?')) return;
+async function resetTodayConfirm() {
+  const ok = await confirmDialog({
+    title: 'Réinitialiser aujourd\'hui ?',
+    message: 'Les données du jour (sport, travail, dépenses, notes…) seront supprimées.',
+    okLabel: 'Réinitialiser', icon: '🗑',
+  });
+  if (!ok) return;
   delete S.days[todayKey()];
-  saveState();
-  loadTodayView();
+  persist();
+  renderActiveView();
   showToast('🗑 Journée réinitialisée');
 }
-function resetAllConfirm() {
-  if (!confirm('⚠️ Tout effacer ?')) return;
-  if (!confirm('Dernière confirmation — vraiment tout supprimer ?')) return;
-  S = { days:{}, planning:{}, birthdays:[], goals:{ steps:10000, sport:150, budget:500, work:35 } };
-  saveState();
-  initApp();
+
+async function resetAllConfirm() {
+  const ok1 = await confirmDialog({
+    title: 'Tout effacer ?',
+    message: 'Toutes vos journées, anniversaires, plannings et objectifs seront supprimés' + (mode === 'cloud' ? ' (y compris dans le cloud)' : '') + '.',
+    okLabel: 'Continuer', icon: '⚠️',
+  });
+  if (!ok1) return;
+  const ok2 = await confirmDialog({
+    title: 'Dernière confirmation',
+    message: 'Vraiment tout supprimer ? Cette action est irréversible.',
+    okLabel: 'Tout effacer', icon: '💣',
+  });
+  if (!ok2) return;
+  const name = currentUser && currentUser.name;
+  S = newState();
+  if (name) S.profile.name = name;
+  persist();
+  renderActiveView();
   showToast('💣 Données supprimées');
 }
 
 /* ════════════════════════════════════════════
-   CONFETTI
+   MODALE DE CONFIRMATION (Promise)
+════════════════════════════════════════════ */
+let _confirmResolve = null;
+
+function confirmDialog({ title, message = '', okLabel = 'Confirmer', icon = '⚠️', danger = true }) {
+  return new Promise(resolve => {
+    // Si une confirmation était déjà ouverte, l'annuler proprement
+    if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(false); }
+    _confirmResolve = resolve;
+    $('confirmIcon').textContent = icon;
+    $('confirmTitle').textContent = title;
+    $('confirmMsg').textContent = message;
+    const ok = $('confirmOk');
+    ok.textContent = okLabel;
+    ok.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
+    $('confirmModal').classList.remove('hidden');
+    setTimeout(() => ok.focus(), 50);
+  });
+}
+
+function resolveConfirm(value) {
+  $('confirmModal').classList.add('hidden');
+  const r = _confirmResolve;
+  _confirmResolve = null;
+  if (r) r(value);
+}
+
+/* ════════════════════════════════════════════
+   CONFETTIS
 ════════════════════════════════════════════ */
 function confetti() {
-  const colors = ['#6366F1','#34D399','#FBBF24','#60A5FA','#F87171','#F472B6'];
-  for (let i=0;i<18;i++) {
+  const colors = ['#6366F1', '#34D399', '#FBBF24', '#60A5FA', '#F87171', '#F472B6'];
+  for (let i = 0; i < 18; i++) {
     const p = document.createElement('div');
     p.className = 'cfp';
     p.style.cssText = `left:${Math.random()*100}vw;top:20vh;width:${5+Math.random()*7}px;height:${5+Math.random()*7}px;background:${colors[Math.floor(Math.random()*colors.length)]};animation-delay:${Math.random()*.3}s;animation-duration:${.8+Math.random()*.7}s`;
     document.body.appendChild(p);
-    setTimeout(()=>p.remove(),1800);
+    setTimeout(() => p.remove(), 1800);
   }
 }
 
 /* ════════════════════════════════════════════
-   SYNC FIREBASE — même système que Annuaire KPI
+   ÉVÉNEMENTS GLOBAUX
 ════════════════════════════════════════════ */
-const LS_SYNC = 'vieSyncConfig';
-const getSyncConfig = () => { try{return JSON.parse(localStorage.getItem(LS_SYNC));}catch{return null;} };
-const setSyncConfig = cfg => cfg ? localStorage.setItem(LS_SYNC,JSON.stringify(cfg)) : localStorage.removeItem(LS_SYNC);
+// Entrée = valider sur les écrans d'auth
+$('loginInput').addEventListener('keydown', e => { if (e.key === 'Enter') localLogin(); });
+$('authEmail').addEventListener('keydown', e => { if (e.key === 'Enter') $('authPassword').focus(); });
+$('authPassword').addEventListener('keydown', e => { if (e.key === 'Enter') submitAuth(); });
 
-let fbApp=null,fbDb=null,fbUnsub=null,syncDebounce=null,lastPushAt=0,lastAppliedAt=0,connectedCode=null,applyingSync=false;
+// Boutons de la modale de confirmation
+$('confirmOk').addEventListener('click', () => resolveConfirm(true));
+$('confirmCancel').addEventListener('click', () => resolveConfirm(false));
+$('confirmModal').addEventListener('click', e => { if (e.target.id === 'confirmModal') resolveConfirm(false); });
 
-function setSyncUI(state, detail) {
-  const dot = document.getElementById('syncDot');
-  const bar = document.getElementById('syncStatusBar');
-  const mod = document.getElementById('syncStatusModal');
-  const map = {
-    off:       {dot:'',      bar:'⚪ Non configuré',                    cls:''},
-    connected: {dot:'ok',    bar:'🟢 Synchronisation active',           cls:'connected'},
-    syncing:   {dot:'syncing',bar:'🔄 Synchronisation…',               cls:'syncing'},
-    error:     {dot:'err',   bar:'🔴 Erreur : '+(detail||'voir console'),cls:'error'},
-  };
-  const s = map[state]||map.off;
-  if (dot) dot.className='sync-dot '+(s.dot||'');
-  if (bar) bar.textContent=s.bar;
-  if (mod) { mod.textContent=s.bar; mod.className='sync-status-modal '+s.cls; }
-}
+// Fermeture des modales au clic sur le fond
+$('editModal').addEventListener('click', e => { if (e.target.id === 'editModal') closeEditModal(); });
+$('birthdayPopup').addEventListener('click', e => { if (e.target.id === 'birthdayPopup') closeBdayPopup(); });
 
-function syncDocRef(code) { return fbDb.collection('vie_sync').doc(code); }
-function buildPayload()    { return { days:S.days, planning:S.planning, birthdays:S.birthdays, goals:S.goals, user:currentUser, updatedAt:Date.now() }; }
-
-function scheduleAutoSync() {
-  const cfg=getSyncConfig();
-  if(!cfg||!cfg.enabled||!fbDb||applyingSync)return;
-  clearTimeout(syncDebounce);
-  syncDebounce=setTimeout(()=>pushToCloud(false),1500);
-}
-
-async function pushToCloud(manual) {
-  const cfg=getSyncConfig();if(!cfg||!fbDb)return;
-  setSyncUI('syncing');
-  try{
-    const p=buildPayload();lastPushAt=p.updatedAt;
-    await syncDocRef(cfg.code).set(p);
-    setSyncUI('connected');
-    if(manual)showToast('☁️ Données envoyées dans le cloud');
-  }catch(err){setSyncUI('error',err.message);if(manual)showToast('❌ Erreur de synchronisation');}
-}
-
-function applyRemote(payload,fromListen) {
-  applyingSync=true;
-  if(payload.days)      S.days      =payload.days;
-  if(payload.planning)  S.planning  =payload.planning;
-  if(payload.birthdays) S.birthdays =payload.birthdays;
-  if(payload.goals)     S.goals     ={...S.goals,...payload.goals};
-  applyingSync=false;
-  localStorage.setItem(LS_KEY(),JSON.stringify(S));
-  loadTodayView();
-  if(!fromListen)showToast('✅ Données récupérées depuis le cloud');
-}
-
-async function pullFromCloud(manual) {
-  const cfg=getSyncConfig();if(!cfg||!fbDb)return;
-  setSyncUI('syncing');
-  try{
-    const snap=await syncDocRef(cfg.code).get();
-    if(!snap.exists){setSyncUI('connected');if(manual)showToast('Aucune donnée cloud pour ce code');return;}
-    applyRemote(snap.data(),false);setSyncUI('connected');
-  }catch(err){setSyncUI('error',err.message);if(manual)showToast('❌ Erreur cloud');}
-}
-
-function listenRemote(code) {
-  if(fbUnsub){fbUnsub();fbUnsub=null;}
-  fbUnsub=syncDocRef(code).onSnapshot(snap=>{
-    if(!snap.exists)return;
-    const p=snap.data();
-    if(!p||!p.updatedAt)return;
-    if(p.updatedAt===lastPushAt||p.updatedAt===lastAppliedAt)return;
-    lastAppliedAt=p.updatedAt;
-    applyRemote(p,true);
-    showToast('☁️ Données mises à jour depuis un autre appareil');
-  },err=>setSyncUI('error',err.message));
-}
-
-function connectSync(manual) {
-  try{
-    const cfg=getSyncConfig();
-    if(!cfg||!cfg.config||!cfg.code){setSyncUI('off');return;}
-    if(typeof firebase==='undefined'){setSyncUI('error','Firebase non chargé');return;}
-    if(fbDb&&fbUnsub&&connectedCode===cfg.code){setSyncUI('connected');if(manual)showToast('Déjà connecté ☁️');return;}
-    if(!fbApp){
-      fbApp=firebase.apps&&firebase.apps.length?firebase.apps[0]:firebase.initializeApp(cfg.config);
-      fbDb=firebase.firestore();
-    }
-    listenRemote(cfg.code);
-    connectedCode=cfg.code;setSyncUI('connected');
-    if(manual)showToast('☁️ Connecté — code : '+cfg.code);
-  }catch(err){setSyncUI('error',err.message);if(manual)showToast('❌ Échec connexion');}
-}
-
-function disconnectSync(){
-  if(fbUnsub){fbUnsub();fbUnsub=null;}
-  connectedCode=null;setSyncConfig(null);setSyncUI('off');
-  showToast('Synchronisation désactivée');
-}
-
-function openSyncModal(){
-  const cfg=getSyncConfig();
-  document.getElementById('syncConfigInput').value=cfg?.config?JSON.stringify(cfg.config,null,2):'';
-  document.getElementById('syncCodeInput').value=cfg?.code||'';
-  document.getElementById('syncEnabled').checked=!!cfg?.enabled;
-  if(cfg&&cfg.config&&cfg.code)connectSync(false);else setSyncUI('off');
-  document.getElementById('syncModal').classList.remove('hidden');
-}
-function closeSyncModal(){document.getElementById('syncModal').classList.add('hidden');}
-
-document.getElementById('syncModal').addEventListener('click',e=>{if(e.target.id==='syncModal')closeSyncModal();});
-
-document.getElementById('syncConfigInput')?.parentElement;
-document.getElementById('syncModal').querySelector('#syncCodeInput');
-
-// Boutons modal sync
-document.addEventListener('click',e=>{
-  if(e.target.id==='connectSyncBtnModal'){
-    let cfg;try{cfg=JSON.parse(document.getElementById('syncConfigInput').value.trim());}catch{return showToast('❌ JSON invalide');}
-    const code=document.getElementById('syncCodeInput').value.trim();
-    if(!code)return showToast('⚠️ Entrez un code');
-    fbApp=null;fbDb=null;connectedCode=null;
-    setSyncConfig({config:cfg,code,enabled:true});connectSync(true);
-  }
-});
-
-// Wire modal buttons via IDs in HTML
-document.querySelector('#syncModal .modal-actions')?.addEventListener('click',e=>{
-  const id=e.target.closest('.btn')?.getAttribute('onclick');
+// Échap : fermer la surcouche la plus haute
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (_confirmResolve) { resolveConfirm(false); return; }
+  if (!$('editModal').classList.contains('hidden')) { closeEditModal(); return; }
+  if (!$('birthdayPopup').classList.contains('hidden')) { closeBdayPopup(); return; }
+  closeMenu();
 });
 
 /* ════════════════════════════════════════════
-   INIT
-════════════════════════════════════════════ */
-function initApp() {
-  const now = new Date();
-  calY = now.getFullYear(); calM = now.getMonth();
-  document.getElementById('topbarDate').textContent = now.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
-
-  // Activer la vue today
-  sv('today', null);
-  document.querySelector('[data-v="today"]')?.classList.add('active');
-
-  loadTodayView();
-  checkBirthdays();
-}
-
-/* ════════════════════════════════════════════
-   PWA — Service Worker (HTTP uniquement)
+   PWA — SERVICE WORKER
 ════════════════════════════════════════════ */
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js')
-      .then(() => console.log('✅ SW enregistré'))
+      .then(() => console.log('✅ Service worker enregistré'))
       .catch(e => console.warn('SW:', e));
   });
 }
 
 /* ════════════════════════════════════════════
-   AUTO-LOGIN
+   GO !
 ════════════════════════════════════════════ */
-if (currentUser) {
-  try { doLogin(currentUser); }
-  catch(err) {
-    console.error('Auto-login error:', err);
-    loginScreen.style.display = 'flex';
-  }
-}
+boot();

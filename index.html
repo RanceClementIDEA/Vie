@@ -3,25 +3,85 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0F172A">
+<meta name="description" content="Suivi de Vie — journal quotidien intelligent : sport, marche, travail, dépenses, activités et objectifs.">
 <title>🌟 Suivi de Vie</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="dark">
 
-<!-- ══ LOGIN ══ -->
-<div id="loginScreen">
+<!-- ══ ÉCRAN DE CHARGEMENT ══ -->
+<div id="bootScreen">
+  <div class="boot-spinner"></div>
+  <div class="boot-txt">Chargement…</div>
+</div>
+
+<!-- ══ AUTHENTIFICATION ══ -->
+<div id="authScreen" style="display:none">
   <div class="login-bg"><div class="lb1"></div><div class="lb2"></div><div class="lb3"></div></div>
   <div class="login-card">
     <div class="login-emoji">🌟</div>
     <div class="login-title">Suivi de Vie</div>
     <div class="login-sub">Votre journal quotidien intelligent</div>
-    <div class="login-form">
-      <label>Votre prénom</label>
-      <input type="text" id="loginInput" placeholder="Ex : Marie" autocomplete="given-name">
-      <button id="loginBtn">Commencer <span>→</span></button>
+
+    <!-- Connexion cloud (Firebase configuré) -->
+    <div id="authCloud" style="display:none">
+      <div class="auth-tabs" role="tablist">
+        <button class="auth-tab active" id="tabLogin" onclick="setAuthTab('login')">Connexion</button>
+        <button class="auth-tab" id="tabSignup" onclick="setAuthTab('signup')">Inscription</button>
+      </div>
+      <div class="login-form">
+        <div class="stack" id="signupNameWrap" style="display:none">
+          <label for="authName">Votre prénom</label>
+          <input type="text" id="authName" placeholder="Ex : Marie" autocomplete="given-name" maxlength="40">
+        </div>
+        <label for="authEmail">Adresse e-mail</label>
+        <input type="email" id="authEmail" placeholder="vous@exemple.fr" autocomplete="email" inputmode="email">
+        <label for="authPassword">Mot de passe</label>
+        <div class="pw-wrap">
+          <input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password">
+          <button type="button" class="pw-toggle" onclick="togglePw()" aria-label="Afficher / masquer le mot de passe">👁</button>
+        </div>
+        <div class="auth-error" id="authError"></div>
+        <button id="authSubmit" onclick="submitAuth()">Se connecter <span>→</span></button>
+        <button class="auth-link" id="forgotLink" onclick="forgotPassword()">Mot de passe oublié ?</button>
+        <div class="auth-divider"><span>ou</span></div>
+        <button class="btn-google" onclick="googleSignIn()">
+          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.1 18.9 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C41.4 35.4 44 30.1 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+          Continuer avec Google
+        </button>
+        <button class="auth-link" onclick="showLocalPanel()">Continuer sans compte (mode local)</button>
+      </div>
     </div>
+
+    <!-- Mode local (sans compte) -->
+    <div id="authLocal" style="display:none">
+      <div class="login-form">
+        <label for="loginInput">Votre prénom</label>
+        <input type="text" id="loginInput" placeholder="Ex : Marie" autocomplete="given-name" maxlength="40">
+        <div class="auth-error" id="localError"></div>
+        <button id="loginBtn" onclick="localLogin()">Commencer <span>→</span></button>
+        <button class="auth-link" id="switchCloudLink" onclick="showCloudPanel()" style="display:none">← Se connecter avec un e-mail</button>
+      </div>
+      <details class="fb-setup" id="fbSetupBox">
+        <summary>☁️ Activer le compte cloud (Firebase)</summary>
+        <p>Collez la configuration de votre projet Firebase pour activer la connexion par e-mail et la synchronisation entre appareils. Voir le README pour le pas-à-pas.</p>
+        <textarea id="fbConfigInput" rows="6" spellcheck="false" placeholder='{
+  "apiKey": "AIza…",
+  "authDomain": "mon-projet.firebaseapp.com",
+  "projectId": "mon-projet",
+  ...
+}'></textarea>
+        <button class="btn btn-primary btn-sm" onclick="saveFbConfig()">💾 Enregistrer & recharger</button>
+      </details>
+    </div>
+
+    <div class="auth-mode-note" id="authModeNote"></div>
   </div>
 </div>
 
@@ -32,7 +92,7 @@
   <div id="birthdayPopup" class="popup-overlay hidden">
     <div class="popup-card birthday-popup">
       <div class="popup-confetti" id="popupConfetti"></div>
-      <button onclick="closeBdayPopup()" style="position:absolute;top:12px;right:14px;background:rgba(255,255,255,.15);border:none;border-radius:8px;color:white;font-size:18px;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10">✕</button>
+      <button class="popup-close" onclick="closeBdayPopup()" aria-label="Fermer">✕</button>
       <div class="bday-emoji">🎂</div>
       <div class="bday-title">Joyeux Anniversaire !</div>
       <div class="bday-names" id="bdayNames"></div>
@@ -43,15 +103,15 @@
   <!-- TOPBAR -->
   <div id="topbar">
     <div class="topbar-left">
-      <button class="menu-btn" onclick="toggleMenu()">☰</button>
+      <button class="menu-btn" onclick="toggleMenu()" aria-label="Menu">☰</button>
       <div class="topbar-info">
         <div class="topbar-title" id="topbarTitle">Aujourd'hui</div>
         <div class="topbar-date" id="topbarDate"></div>
       </div>
     </div>
     <div class="topbar-right">
-      <button class="theme-btn" onclick="cycleTheme()" title="Changer le thème">🎨</button>
-      <div class="sync-dot-wrap" id="syncDotWrap" title="Sync cloud">
+      <button class="theme-btn" onclick="cycleTheme()" title="Changer le thème" aria-label="Changer le thème">🎨</button>
+      <div class="sync-dot-wrap" id="syncDotWrap" title="Synchronisation" onclick="syncInfo()">
         <div class="sync-dot" id="syncDot"></div>
       </div>
     </div>
@@ -59,19 +119,19 @@
 
   <!-- BOTTOM NAV -->
   <div id="bottomNav">
-    <div class="bnav" data-v="today" onclick="sv('today',this)">
+    <div class="bnav" data-v="today" onclick="sv('today')">
       <div class="bnav-icon">📅</div><div class="bnav-lbl">Aujourd'hui</div>
     </div>
-    <div class="bnav" data-v="calendar" onclick="sv('calendar',this)">
+    <div class="bnav" data-v="calendar" onclick="sv('calendar')">
       <div class="bnav-icon">🗓</div><div class="bnav-lbl">Calendrier</div>
     </div>
-    <div class="bnav" data-v="history" onclick="sv('history',this)">
+    <div class="bnav" data-v="history" onclick="sv('history')">
       <div class="bnav-icon">📋</div><div class="bnav-lbl">Historique</div>
     </div>
-    <div class="bnav" data-v="stats" onclick="sv('stats',this)">
+    <div class="bnav" data-v="stats" onclick="sv('stats')">
       <div class="bnav-icon">📊</div><div class="bnav-lbl">Stats</div>
     </div>
-    <div class="bnav" data-v="more" onclick="sv('more',this)">
+    <div class="bnav" data-v="more" onclick="sv('more')">
       <div class="bnav-icon">⚙️</div><div class="bnav-lbl">Plus</div>
     </div>
   </div>
@@ -82,21 +142,21 @@
     <div class="sidemenu-header">
       <div class="sidemenu-avatar" id="sidemenuAvatar">?</div>
       <div class="sidemenu-name" id="sidemenuName">—</div>
-      <div class="sidemenu-role">Mon journal</div>
+      <div class="sidemenu-role" id="sidemenuRole">Mon journal</div>
     </div>
     <div class="sidemenu-nav">
-      <div class="smitem active" onclick="sv('today',null);toggleMenu()">📅 Aujourd'hui</div>
-      <div class="smitem" onclick="sv('calendar',null);toggleMenu()">🗓 Calendrier</div>
-      <div class="smitem" onclick="sv('history',null);toggleMenu()">📋 Historique</div>
-      <div class="smitem" onclick="sv('stats',null);toggleMenu()">📊 Statistiques</div>
-      <div class="smitem" onclick="sv('planning',null);toggleMenu()">📆 Planning</div>
-      <div class="smitem" onclick="sv('birthdays',null);toggleMenu()">🎂 Anniversaires</div>
-      <div class="smitem" onclick="sv('goals',null);toggleMenu()">🎯 Objectifs</div>
-      <div class="smitem" onclick="sv('more',null);toggleMenu()">⚙️ Paramètres</div>
+      <div class="smitem" data-v="today" onclick="sv('today');closeMenu()">📅 Aujourd'hui</div>
+      <div class="smitem" data-v="calendar" onclick="sv('calendar');closeMenu()">🗓 Calendrier</div>
+      <div class="smitem" data-v="history" onclick="sv('history');closeMenu()">📋 Historique</div>
+      <div class="smitem" data-v="stats" onclick="sv('stats');closeMenu()">📊 Statistiques</div>
+      <div class="smitem" data-v="planning" onclick="sv('planning');closeMenu()">📆 Planning</div>
+      <div class="smitem" data-v="birthdays" onclick="sv('birthdays');closeMenu()">🎂 Anniversaires</div>
+      <div class="smitem" data-v="goals" onclick="sv('goals');closeMenu()">🎯 Objectifs</div>
+      <div class="smitem" data-v="more" onclick="sv('more');closeMenu()">⚙️ Paramètres</div>
     </div>
     <div class="sidemenu-footer">
-      <button class="btn btn-ghost btn-sm" onclick="openSyncModal();toggleMenu()">☁️ Synchronisation</button>
-      <button class="btn btn-danger btn-sm" onclick="doLogout()">🚪 Déconnexion</button>
+      <div class="sidemenu-sync" id="sidemenuSync">—</div>
+      <button class="btn btn-danger btn-sm" onclick="logout()">🚪 Déconnexion</button>
     </div>
   </div>
 
@@ -105,6 +165,16 @@
 
     <!-- ══ VUE : AUJOURD'HUI ══ -->
     <div class="view active" id="view-today">
+
+      <!-- ACCUEIL / RÉSUMÉ -->
+      <div class="greet-card">
+        <div class="greet-emoji" id="greetEmoji">👋</div>
+        <div class="greet-body">
+          <div class="greet-title" id="greetTitle">Bonjour !</div>
+          <div class="greet-sub" id="greetSub">—</div>
+        </div>
+        <div class="greet-streak" id="greetStreak" title="Jours consécutifs remplis">🔥 0</div>
+      </div>
 
       <!-- SPORT -->
       <div class="section-card">
@@ -120,11 +190,11 @@
           <div class="input-row">
             <div class="input-group">
               <label>Durée (minutes)</label>
-              <input type="number" id="sportTime" min="0" max="300" placeholder="30" oninput="saveToday()">
+              <input type="number" id="sportTime" min="0" max="600" placeholder="30" oninput="saveToday()">
             </div>
             <div class="input-group">
               <label>Type d'activité</label>
-              <input type="text" id="sportType" placeholder="Course, vélo…" oninput="saveToday()">
+              <input type="text" id="sportType" placeholder="Course, vélo…" maxlength="60" oninput="saveToday()">
             </div>
           </div>
         </div>
@@ -158,7 +228,7 @@
           <div class="work-total" id="workTotalDisp">— h</div>
         </div>
         <div class="section-body">
-          <div class="input-row">
+          <div class="input-row triple">
             <div class="input-group">
               <label>Début</label>
               <input type="time" id="workStart" oninput="calcWork()">
@@ -169,7 +239,7 @@
             </div>
             <div class="input-group">
               <label>Pause (min)</label>
-              <input type="number" id="workBreak" min="0" max="240" value="60" placeholder="60" oninput="calcWork()">
+              <input type="number" id="workBreak" min="0" max="480" value="60" placeholder="60" oninput="calcWork()">
             </div>
           </div>
           <div class="work-result" id="workResult"></div>
@@ -185,9 +255,9 @@
         </div>
         <div class="section-body">
           <div class="expense-add-row">
-            <input type="number" id="expenseAmt" min="0" step="0.01" placeholder="Montant (€)">
-            <input type="text" id="expenseLabel" placeholder="Description…" onkeydown="if(event.key==='Enter')addExpense()">
-            <button class="btn btn-primary btn-sm" onclick="addExpense()">+</button>
+            <input type="number" id="expenseAmt" min="0" step="0.01" placeholder="Montant (€)" inputmode="decimal">
+            <input type="text" id="expenseLabel" placeholder="Description…" maxlength="80" onkeydown="if(event.key==='Enter')addExpense()">
+            <button class="btn btn-primary btn-sm" onclick="addExpense()" aria-label="Ajouter la dépense">+</button>
           </div>
           <div class="expense-list" id="expenseList"></div>
         </div>
@@ -201,8 +271,8 @@
         </div>
         <div class="section-body">
           <div class="activity-add-row">
-            <input type="text" id="activityInput" placeholder="Voyage, sortie, activité…" onkeydown="if(event.key==='Enter')addActivity()">
-            <button class="btn btn-primary btn-sm" onclick="addActivity()">+</button>
+            <input type="text" id="activityInput" placeholder="Voyage, sortie, activité…" maxlength="120" onkeydown="if(event.key==='Enter')addActivity()">
+            <button class="btn btn-primary btn-sm" onclick="addActivity()" aria-label="Ajouter l'activité">+</button>
           </div>
           <div class="activity-list" id="activityList"></div>
           <textarea id="notesText" placeholder="Notes libres…" oninput="saveToday()" rows="3"></textarea>
@@ -210,16 +280,16 @@
       </div>
 
       <!-- BOUTON SAUVEGARDER -->
-      <button class="btn btn-save" onclick="saveToday(true)">💾 Sauvegarder la journée</button>
+      <button class="btn-save" onclick="saveToday(true)">💾 Sauvegarder la journée</button>
 
     </div><!-- /view-today -->
 
     <!-- ══ VUE : CALENDRIER ══ -->
     <div class="view" id="view-calendar">
       <div class="cal-header-row">
-        <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
+        <button class="cal-nav-btn" onclick="calNav(-1)" aria-label="Mois précédent">‹</button>
         <div class="cal-month-label" id="calMonthLabel">—</div>
-        <button class="cal-nav-btn" onclick="calNav(1)">›</button>
+        <button class="cal-nav-btn" onclick="calNav(1)" aria-label="Mois suivant">›</button>
         <button class="btn btn-ghost btn-sm" onclick="calGoToday()">Auj.</button>
       </div>
       <div class="cal-grid-header">
@@ -235,9 +305,10 @@
       <div class="day-detail-card" id="dayDetailCard" style="display:none">
         <div class="day-detail-header">
           <div class="day-detail-title" id="dayDetailTitle">—</div>
-          <div style="display:flex;gap:8px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="editDayFromDetail()">✏️ Modifier</button>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('dayDetailCard').style.display='none'">✕</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteDayFromDetail()" aria-label="Supprimer la journée">🗑</button>
+            <button class="btn btn-ghost btn-sm" onclick="hideDayDetail()" aria-label="Fermer">✕</button>
           </div>
         </div>
         <div id="dayDetailContent"></div>
@@ -248,7 +319,8 @@
     <div class="view" id="view-history">
       <div class="history-filters">
         <input type="month" id="histMonthFilter" class="field-input" oninput="renderHistory()">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('histMonthFilter').value='';renderHistory()">Tout</button>
+        <input type="search" id="histSearch" class="field-input hist-search" placeholder="🔍 Rechercher…" oninput="renderHistory()">
+        <button class="btn btn-ghost btn-sm" onclick="clearHistFilters()">Tout</button>
       </div>
       <div id="historyList"></div>
     </div>
@@ -267,7 +339,7 @@
     <!-- ══ VUE : PLANNING ══ -->
     <div class="view" id="view-planning">
       <div class="view-section-title">📆 Planning hebdomadaire</div>
-      <p class="view-desc">Définissez vos horaires types par jour de la semaine. Ils seront pré-remplis automatiquement.</p>
+      <p class="view-desc">Définissez vos horaires types par jour de la semaine. Ils seront pré-remplis automatiquement dans « Aujourd'hui ».</p>
       <div id="planningGrid"></div>
       <button class="btn btn-primary" onclick="savePlanning()">💾 Sauvegarder le planning</button>
     </div>
@@ -277,7 +349,7 @@
       <div class="view-section-title">🎂 Anniversaires</div>
       <div class="bday-add-form">
         <div class="input-row">
-          <div class="input-group"><label>Prénom / Nom</label><input type="text" id="bdayName" placeholder="Marie Dupont"></div>
+          <div class="input-group"><label>Prénom / Nom</label><input type="text" id="bdayName" placeholder="Marie Dupont" maxlength="60"></div>
           <div class="input-group"><label>Date de naissance</label><input type="date" id="bdayDate"></div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -309,6 +381,11 @@
     <div class="view" id="view-more">
       <div class="view-section-title">⚙️ Paramètres</div>
 
+      <div class="settings-section" id="accountSection">
+        <div class="settings-label">👤 Compte</div>
+        <div id="accountBox" class="account-box"></div>
+      </div>
+
       <div class="settings-section">
         <div class="settings-label">🎨 Thème</div>
         <div class="theme-grid">
@@ -319,25 +396,35 @@
         </div>
       </div>
 
-      <div class="settings-section">
-        <div class="settings-label">☁️ Cloud Firebase</div>
-        <div id="syncStatusBar" class="sync-status-bar">⚪ Non configuré</div>
-        <button class="btn btn-primary btn-sm" onclick="openSyncModal()">⚙️ Configurer la synchro</button>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-label">📤 Export</div>
+      <div class="settings-section" id="cloudTools" style="display:none">
+        <div class="settings-label">☁️ Synchronisation</div>
+        <div id="syncStatusBar" class="sync-status-bar">⚪ —</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="exportJSON()">🗄 Sauvegarde JSON</button>
-          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📊 Export CSV</button>
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer">📥 Importer<input type="file" accept=".json" style="display:none" onchange="importJSON(event)"></label>
+          <button class="btn btn-secondary btn-sm" onclick="forcePush()">⬆️ Forcer l'envoi</button>
+          <button class="btn btn-secondary btn-sm" onclick="forcePull()">⬇️ Forcer la récupération</button>
         </div>
       </div>
 
       <div class="settings-section">
-        <div class="settings-label" style="color:var(--red)">⚠️ Danger</div>
-        <button class="btn btn-danger btn-sm" onclick="resetTodayConfirm()">🗑 Réinitialiser aujourd'hui</button>
-        <button class="btn btn-danger btn-sm" onclick="resetAllConfirm()">💣 Tout effacer</button>
+        <div class="settings-label">📤 Export / Import</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="exportJSON()">🗄 Sauvegarde JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">📊 Export CSV</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">📥 Importer<input type="file" accept=".json,application/json" style="display:none" onchange="importJSON(event)"></label>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label" style="color:var(--red)">⚠️ Zone de danger</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-danger btn-sm" onclick="resetTodayConfirm()">🗑 Réinitialiser aujourd'hui</button>
+          <button class="btn btn-danger btn-sm" onclick="resetAllConfirm()">💣 Tout effacer</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-label">ℹ️ À propos</div>
+        <p class="view-desc" style="margin:0">Suivi de Vie <span id="appVersion">v2.0.0</span> — journal quotidien : sport, marche, travail, dépenses, activités, anniversaires et objectifs. Fonctionne hors-ligne (PWA).</p>
       </div>
     </div>
 
@@ -345,56 +432,43 @@
 
 </div><!-- /app -->
 
-<!-- MODAL SYNC -->
-<div id="syncModal" class="modal-overlay hidden">
-  <div class="modal-card">
-    <div class="modal-hdr">
-      <div class="modal-ttl">☁️ Synchronisation Firebase</div>
-      <button class="modal-x" onclick="closeSyncModal()">✕</button>
-    </div>
-    <p class="modal-sub">Synchronisez vos données entre tous vos appareils via votre projet Firebase.</p>
-    <div id="syncStatusModal" class="sync-status-modal">⚪ Non configuré</div>
-    <label class="modal-label">Configuration Firebase (JSON)</label>
-    <textarea id="syncConfigInput" rows="6" placeholder='{
-  "apiKey": "...",
-  "authDomain": "...",
-  "projectId": "...",
-  ...
-}'></textarea>
-    <label class="modal-label">Code de synchronisation</label>
-    <input type="text" id="syncCodeInput" placeholder="Ex : mavie-2026 (même sur tous vos appareils)">
-    <label class="modal-checkbox-row">
-      <input type="checkbox" id="syncEnabled"> Synchronisation automatique
-    </label>
-    <div class="modal-actions">
-      <button class="btn btn-primary" onclick="connectSync(true)">☁️ Connecter</button>
-      <button class="btn btn-secondary" onclick="pushToCloud(true)">⬆️ Envoyer</button>
-      <button class="btn btn-secondary" onclick="pullFromCloud(true)">⬇️ Récupérer</button>
-      <button class="btn btn-secondary" onclick="disconnectSync()">🔌 Désactiver</button>
-    </div>
-  </div>
-</div>
-
 <!-- MODAL MODIFICATION JOUR -->
 <div id="editModal" class="modal-overlay hidden">
   <div class="modal-card modal-large">
     <div class="modal-hdr">
       <div class="modal-ttl" id="editModalTitle">✏️ Modifier le jour</div>
-      <button class="modal-x" onclick="closeEditModal()">✕</button>
+      <button class="modal-x" onclick="closeEditModal()" aria-label="Fermer">✕</button>
     </div>
     <div id="editModalContent"></div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" onclick="saveEditModal()">💾 Sauvegarder</button>
+    <div class="modal-actions modal-actions-split">
+      <button class="btn btn-danger btn-sm" onclick="deleteEditDay()">🗑 Supprimer ce jour</button>
+      <div class="flex-spacer"></div>
       <button class="btn btn-ghost" onclick="closeEditModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveEditModal()">💾 Sauvegarder</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CONFIRMATION -->
+<div id="confirmModal" class="modal-overlay hidden">
+  <div class="modal-card modal-sm">
+    <div class="confirm-icon" id="confirmIcon">⚠️</div>
+    <div class="confirm-title" id="confirmTitle">—</div>
+    <div class="confirm-msg" id="confirmMsg"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="confirmCancel">Annuler</button>
+      <button class="btn btn-danger" id="confirmOk">Confirmer</button>
     </div>
   </div>
 </div>
 
 <!-- TOAST -->
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

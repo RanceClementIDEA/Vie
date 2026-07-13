@@ -1,0 +1,14 @@
+{
+  "name": "Suivi de Vie",
+  "short_name": "Suivi de Vie",
+  "description": "Journal quotidien intelligent : sport, marche, travail, dépenses, activités et objectifs.",
+  "lang": "fr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
