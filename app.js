@@ -8,12 +8,66 @@
 'use strict';
 
 /* ── CONSTANTES ── */
-const APP_VERSION   = '2.0.1';
+const APP_VERSION   = '2.1.0';
 const STEPS_PER_KM  = 1300;
 const DEFAULT_GOALS = { steps: 10000, sport: 150, budget: 500, work: 35 };
 
+/* ── CATALOGUE DE THÈMES ──
+   Les 4 premiers existent déjà dans style.css ; les suivants sont injectés
+   dynamiquement (voir injectDynamicStyles) pour que ce fichier reste autonome. */
+const THEME_CATALOG = [
+  { id: 'dark',     label: 'Sombre',    emoji: '🌙', bg: '#0F172A' },
+  { id: 'light',    label: 'Clair',     emoji: '☀️', bg: '#F0F4FF' },
+  { id: 'blue',     label: 'Océan',     emoji: '🌊', bg: '#0A0F2E' },
+  { id: 'green',    label: 'Forêt',     emoji: '🌿', bg: '#052E16' },
+  { id: 'sakura',   label: 'Sakura',    emoji: '🌸', bg: '#FFF1F5' },
+  { id: 'cyberpunk',label: 'Cyberpunk', emoji: '🤖', bg: '#0A0016' },
+  { id: 'sunset',   label: 'Sunset',    emoji: '🌇', bg: '#2B1530' },
+  { id: 'emerald',  label: 'Émeraude',  emoji: '💎', bg: '#04231C' },
+  { id: 'aurora',   label: 'Aurore',    emoji: '🌌', bg: '#0A1424' },
+  { id: 'mono',     label: 'Graphite',  emoji: '⚫', bg: '#0C0C0E' },
+];
+const THEMES = THEME_CATALOG.map(t => t.id);
+
+/* ── CATALOGUE DE SUIVIS D'ACTIVITÉ ──
+   Types : counter (± entiers), number (valeur libre), scale (1→5), check (oui/non).
+   inverse:true → l'objectif est un plafond à ne pas dépasser (café, écran, stress…). */
+const TRACKER_CATALOG = [
+  { id:'water',      emoji:'💧', label:'Hydratation',    type:'counter', unit:'verres',  goal:8,  step:1,   color:'#38BDF8' },
+  { id:'sleep',      emoji:'😴', label:'Sommeil',        type:'number',  unit:'h',       goal:8,  step:0.5, color:'#818CF8' },
+  { id:'mood',       emoji:'😊', label:'Humeur',         type:'scale',                              color:'#FBBF24' },
+  { id:'energy',     emoji:'⚡', label:'Énergie',        type:'scale',                              color:'#F59E0B' },
+  { id:'stress',     emoji:'😰', label:'Stress',         type:'scale',   inverse:true,              color:'#FB7185' },
+  { id:'reading',    emoji:'📚', label:'Lecture',        type:'number',  unit:'min',     goal:30, step:5,   color:'#A78BFA' },
+  { id:'meditation', emoji:'🧘', label:'Méditation',     type:'number',  unit:'min',     goal:10, step:5,   color:'#34D399' },
+  { id:'coffee',     emoji:'☕', label:'Café',           type:'counter', unit:'tasses',  goal:2,  step:1,   color:'#B45309', inverse:true },
+  { id:'screen',     emoji:'📱', label:'Temps d\'écran', type:'number',  unit:'h',       goal:3,  step:0.5, color:'#F472B6', inverse:true },
+  { id:'fruits',     emoji:'🍎', label:'Fruits & légumes', type:'counter', unit:'portions', goal:5, step:1, color:'#4ADE80' },
+  { id:'water_plant',emoji:'🌱', label:'Bonne action',   type:'check',                              color:'#22C55E' },
+  { id:'vitamins',   emoji:'💊', label:'Vitamines',      type:'check',                              color:'#F97316' },
+  { id:'gratitude',  emoji:'🙏', label:'Gratitude',      type:'check',                              color:'#FBBF24' },
+  { id:'journaling', emoji:'✍️', label:'Journaling',     type:'check',                              color:'#A78BFA' },
+  { id:'outdoors',   emoji:'🌳', label:'Temps dehors',   type:'number',  unit:'min',     goal:30, step:10,  color:'#34D399' },
+  { id:'weight',     emoji:'⚖️', label:'Poids',          type:'number',  unit:'kg',               step:0.1, color:'#94A3B8' },
+  { id:'mealhealthy',emoji:'🥗', label:'Repas sain',     type:'check',                              color:'#84CC16' },
+  { id:'teeth',      emoji:'🦷', label:'Brossage',       type:'counter', unit:'',        goal:2,  step:1,   color:'#67E8F9' },
+  { id:'cold_shower',emoji:'🚿', label:'Douche froide',  type:'check',                              color:'#38BDF8' },
+  { id:'social',     emoji:'💬', label:'Temps social',   type:'number',  unit:'min',              step:15,  color:'#60A5FA' },
+  { id:'productivity',emoji:'🎯',label:'Productivité',   type:'scale',                              color:'#6366F1' },
+  { id:'pain',       emoji:'🤕', label:'Douleur',        type:'scale',   inverse:true,              color:'#F87171' },
+  { id:'alcohol',    emoji:'🍷', label:'Alcool',         type:'counter', unit:'verres',  inverse:true, step:1, color:'#EF4444' },
+  { id:'smoke',      emoji:'🚬', label:'Cigarettes',     type:'counter', unit:'',        inverse:true, step:1, color:'#9CA3AF' },
+  { id:'music',      emoji:'🎵', label:'Créativité',     type:'check',                              color:'#F472B6' },
+  { id:'nap',        emoji:'💤', label:'Sieste',         type:'check',                              color:'#A78BFA' },
+];
+const DEFAULT_TRACKERS = ['water', 'sleep', 'mood', 'reading'];
+
 function newState() {
-  return { days: {}, deleted: {}, planning: {}, birthdays: [], goals: { ...DEFAULT_GOALS }, profile: {} };
+  return {
+    days: {}, deleted: {}, planning: {}, birthdays: [],
+    goals: { ...DEFAULT_GOALS }, profile: {},
+    trackers: DEFAULT_TRACKERS.slice(), customTrackers: [],
+  };
 }
 
 /* ── ÉTAT GLOBAL ── */
@@ -22,7 +76,9 @@ let mode         = null;   // 'cloud' | 'local'
 let currentUser  = null;   // { uid?, email?, name }
 let currentTheme = localStorage.getItem('vieTheme') || 'dark';
 let activeView   = 'today';
-let statsPeriod  = 'week';
+let statsPeriod  = 'week';          // 'day' | 'week' | 'month' | 'year' | 'custom'
+let statsAnchor  = new Date();      // date de référence de la période affichée
+let statsCustom  = { start: '', end: '' };
 let calY, calM;
 
 /* Firebase */
@@ -70,7 +126,8 @@ function getDayStatus(dateStr) {
   const hasExpenses   = day.expenses && day.expenses.length > 0;
   const hasActivities = day.activities && day.activities.length > 0;
   const hasNotes      = day.notes && day.notes.trim();
-  const count = [hasWork, hasSport, hasWalk, hasExpenses, hasActivities, hasNotes].filter(Boolean).length;
+  const hasTrackers   = day.trackers && Object.values(day.trackers).some(v => v === true || (typeof v === 'number' && v > 0));
+  const count = [hasWork, hasSport, hasWalk, hasExpenses, hasActivities, hasNotes, hasTrackers].filter(Boolean).length;
   if (count >= 3) return 'complete';
   if (count >= 1) return 'partial';
   return 'empty';
@@ -80,20 +137,188 @@ function getDayStatus(dateStr) {
    THÈMES
 ════════════════════════════════════════════ */
 function setTheme(theme, save = true) {
+  if (!THEMES.includes(theme)) theme = 'dark';
   currentTheme = theme;
   document.body.setAttribute('data-theme', theme);
   document.querySelectorAll('.theme-opt').forEach(el => {
     el.classList.toggle('active', el.dataset.theme === theme);
   });
+  // Couleur de la barre système (mobile) accordée au thème
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const info = THEME_CATALOG.find(t => t.id === theme);
+  if (meta && info) meta.setAttribute('content', info.bg);
   if (save) {
     localStorage.setItem('vieTheme', theme);
-    showToast('🎨 Thème appliqué');
+    showToast((info ? info.emoji + ' ' : '🎨 ') + 'Thème ' + (info ? info.label : '') + ' appliqué');
   }
 }
-const THEMES = ['dark', 'light', 'blue', 'green'];
 function cycleTheme() {
   const idx = THEMES.indexOf(currentTheme);
   setTheme(THEMES[(idx + 1) % THEMES.length]);
+}
+
+/* Construit dynamiquement la grille de thèmes (Paramètres) à partir du catalogue */
+function renderThemeGrid() {
+  const grid = document.querySelector('.theme-grid');
+  if (!grid) return;
+  grid.innerHTML = THEME_CATALOG.map(t => `
+    <div class="theme-opt ${t.id === currentTheme ? 'active' : ''}" data-theme="${t.id}" onclick="setTheme('${t.id}')">
+      <span class="theme-swatch" data-theme="${t.id}"></span>
+      <span>${t.emoji} ${t.label}</span>
+    </div>`).join('');
+}
+
+/* ════════════════════════════════════════════
+   STYLES DYNAMIQUES (thèmes additionnels + nouveaux composants)
+   Injectés ici pour que la mise à jour ne concerne que app.js.
+════════════════════════════════════════════ */
+function injectDynamicStyles() {
+  if ($('vieDynamicStyles')) return;
+  const css = `
+  /* ── NOUVEAUX THÈMES ── */
+  [data-theme="sakura"]{
+    --bg:#FFF1F5;--bg2:#FFFFFF;--surface:#FFFFFF;--surface2:#FCE1EC;
+    --border:rgba(219,39,119,.12);--border2:rgba(219,39,119,.07);
+    --primary:#EC4899;--primary-l:#F472B6;--primary-d:#DB2777;
+    --neon:#10B981;--gold:#F59E0B;--red:#EF4444;--blue:#3B82F6;--orange:#FB923C;--pink:#EC4899;
+    --text1:#4A2233;--text2:#8B5A72;--text3:#B98AA0;
+    --sport:#10B981;--walk:#3B82F6;--work:#D97706;--money:#EC4899;--note:#8B5CF6;
+    --gp:0 0 22px rgba(236,72,153,.28);
+  }
+  [data-theme="cyberpunk"]{
+    --bg:#0A0016;--bg2:#140427;--surface:#170A2E;--surface2:#241046;
+    --border:rgba(240,0,255,.22);--border2:rgba(0,240,255,.12);
+    --primary:#F000FF;--primary-l:#FF5EF4;--primary-d:#C800E0;
+    --neon:#00F5D4;--gold:#FCEE0A;--red:#FF3864;--blue:#00E5FF;--orange:#FF9E00;--pink:#FF5EF4;
+    --text1:#F3E9FF;--text2:#B98FE0;--text3:#7C5BAE;
+    --sport:#00F5D4;--walk:#00E5FF;--work:#FCEE0A;--money:#FF5EF4;--note:#B98FE0;
+    --gp:0 0 26px rgba(240,0,255,.45);
+  }
+  [data-theme="sunset"]{
+    --bg:#2B1530;--bg2:#3A1D3F;--surface:#3A1D3F;--surface2:#522A53;
+    --border:rgba(251,146,60,.18);--border2:rgba(251,146,60,.10);
+    --primary:#FB7185;--primary-l:#FDA4AF;--primary-d:#F43F5E;
+    --neon:#34D399;--gold:#FBBF24;--red:#F87171;--blue:#818CF8;--orange:#FB923C;--pink:#F472B6;
+    --text1:#FFF1F2;--text2:#E7B7C4;--text3:#B98597;
+    --sport:#FBBF24;--walk:#FDA4AF;--work:#FB923C;--money:#F472B6;--note:#C4B5FD;
+    --gp:0 0 24px rgba(251,113,133,.35);
+  }
+  [data-theme="emerald"]{
+    --bg:#04231C;--bg2:#06342A;--surface:#06342A;--surface2:#0B4A3B;
+    --border:rgba(16,185,129,.18);--border2:rgba(16,185,129,.10);
+    --primary:#10B981;--primary-l:#34D399;--primary-d:#059669;
+    --neon:#6EE7B7;--gold:#FCD34D;--red:#FB7185;--blue:#5EEAD4;--orange:#FBBF24;--pink:#F472B6;
+    --text1:#ECFDF5;--text2:#8CD9BE;--text3:#4F8B76;
+    --sport:#6EE7B7;--walk:#5EEAD4;--work:#FCD34D;--money:#F472B6;--note:#A7F3D0;
+    --gp:0 0 24px rgba(16,185,129,.32);
+  }
+  [data-theme="aurora"]{
+    --bg:#0A1424;--bg2:#0F1E38;--surface:#0F1E38;--surface2:#193052;
+    --border:rgba(94,234,212,.16);--border2:rgba(129,140,248,.10);
+    --primary:#22D3EE;--primary-l:#67E8F9;--primary-d:#06B6D4;
+    --neon:#5EEAD4;--gold:#FDE68A;--red:#FB7185;--blue:#60A5FA;--orange:#FBBF24;--pink:#C084FC;
+    --text1:#ECFEFF;--text2:#9EC5D8;--text3:#5E86A0;
+    --sport:#5EEAD4;--walk:#60A5FA;--work:#FDE68A;--money:#C084FC;--note:#A5B4FC;
+    --gp:0 0 24px rgba(34,211,238,.3);
+  }
+  [data-theme="mono"]{
+    --bg:#0C0C0E;--bg2:#161618;--surface:#161618;--surface2:#242427;
+    --border:rgba(255,255,255,.10);--border2:rgba(255,255,255,.06);
+    --primary:#E5E5E7;--primary-l:#FFFFFF;--primary-d:#A1A1AA;
+    --neon:#D4D4D8;--gold:#E4E4E7;--red:#F87171;--blue:#D4D4D8;--orange:#E4E4E7;--pink:#E5E5E7;
+    --text1:#FAFAFA;--text2:#A1A1AA;--text3:#6B6B72;
+    --sport:#E4E4E7;--walk:#D4D4D8;--work:#E5E5E7;--money:#FAFAFA;--note:#A1A1AA;
+    --gp:0 0 20px rgba(255,255,255,.12);
+  }
+  [data-theme="sakura"] body,[data-theme="light"] body{--gp:0 0 20px rgba(99,102,241,.12)}
+
+  /* ── APERÇU COULEUR DANS LA GRILLE DE THÈMES ── */
+  .theme-opt{display:flex;align-items:center;gap:9px;justify-content:flex-start;text-align:left}
+  .theme-swatch{width:22px;height:22px;border-radius:7px;flex-shrink:0;border:1px solid rgba(128,128,128,.25)}
+  .theme-swatch[data-theme="dark"]{background:linear-gradient(135deg,#1E293B,#6366F1)}
+  .theme-swatch[data-theme="light"]{background:linear-gradient(135deg,#FFFFFF,#6366F1)}
+  .theme-swatch[data-theme="blue"]{background:linear-gradient(135deg,#0F1B4A,#3B82F6)}
+  .theme-swatch[data-theme="green"]{background:linear-gradient(135deg,#064E3B,#10B981)}
+  .theme-swatch[data-theme="sakura"]{background:linear-gradient(135deg,#FFE4EF,#EC4899)}
+  .theme-swatch[data-theme="cyberpunk"]{background:linear-gradient(135deg,#F000FF,#00F5D4)}
+  .theme-swatch[data-theme="sunset"]{background:linear-gradient(135deg,#FB7185,#FBBF24)}
+  .theme-swatch[data-theme="emerald"]{background:linear-gradient(135deg,#06342A,#34D399)}
+  .theme-swatch[data-theme="aurora"]{background:linear-gradient(135deg,#193052,#22D3EE)}
+  .theme-swatch[data-theme="mono"]{background:linear-gradient(135deg,#242427,#FAFAFA)}
+
+  /* ── SÉLECTEUR DE PÉRIODE (STATS) ── */
+  .stats-period-row{flex-wrap:wrap}
+  .stats-period-row .period-btn{flex:1 1 auto;min-width:60px;padding:9px 8px}
+  .stats-nav-row{display:flex;align-items:center;gap:10px;flex-shrink:0}
+  .stats-nav-btn{width:38px;height:38px;border-radius:10px;background:var(--surface2);color:var(--text2);font-size:18px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);transition:all .2s;cursor:pointer;flex-shrink:0}
+  .stats-nav-btn:hover:not(:disabled){border-color:var(--primary);color:var(--primary-l)}
+  .stats-nav-btn:disabled{opacity:.35;cursor:default}
+  .stats-range-label{flex:1;text-align:center;font-family:'Sora',sans-serif;font-weight:700;font-size:14px;color:var(--text1);text-transform:capitalize}
+  .stats-custom-row{display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap}
+  .stats-custom-row .input-group{flex:1;min-width:130px}
+
+  /* ── SUIVI D'ACTIVITÉ (TRACKERS) ── */
+  .tk-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .tk-card{background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:9px;position:relative;transition:border-color .2s}
+  .tk-card.tk-full{grid-column:1 / -1}
+  .tk-card.tk-done{border-color:color-mix(in srgb,var(--tkc) 55%,transparent)}
+  .tk-head{display:flex;align-items:flex-start;gap:8px}
+  .tk-emoji{font-size:18px;line-height:1.2;flex-shrink:0}
+  .tk-name{font-size:12.5px;font-weight:600;color:var(--text1);flex:1;min-width:0;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .tk-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12.5px;color:var(--tkc);white-space:nowrap;flex-shrink:0;line-height:1.4}
+  .tk-counter{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .tk-btn{width:34px;height:34px;border-radius:9px;background:var(--bg2);border:1px solid var(--border);color:var(--text1);font-size:19px;font-weight:600;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0}
+  .tk-btn:hover{border-color:var(--tkc);color:var(--tkc)}
+  .tk-btn:active{transform:scale(.9)}
+  .tk-counter-val{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:20px;color:var(--text1);text-align:center;flex:1}
+  .tk-counter-val small{display:block;font-size:9px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:1px}
+  .tk-scale{display:flex;gap:6px;justify-content:space-between}
+  .tk-dot{flex:1;height:32px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;color:var(--text3)}
+  .tk-dot:hover{border-color:var(--tkc)}
+  .tk-dot.on{background:var(--tkc);border-color:var(--tkc);color:#fff;transform:scale(1.05)}
+  .tk-num-wrap{display:flex;align-items:center;gap:6px}
+  .tk-num-wrap input{flex:1;min-width:0;background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:8px 10px;color:var(--text1);outline:none;font-size:14px;font-weight:600;transition:border-color .2s}
+  .tk-num-wrap input:focus{border-color:var(--tkc)}
+  .tk-num-unit{font-size:11px;color:var(--text3);font-weight:600;flex-shrink:0}
+  .tk-check-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:9px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:13px;font-weight:600;transition:all .18s;width:100%}
+  .tk-check-btn:hover{border-color:var(--tkc)}
+  .tk-check-btn.on{background:color-mix(in srgb,var(--tkc) 16%,transparent);border-color:var(--tkc);color:var(--tkc)}
+  .tk-bar{height:5px;border-radius:3px;background:var(--bg2);overflow:hidden}
+  .tk-bar-fill{height:100%;border-radius:3px;background:var(--tkc);transition:width .4s cubic-bezier(.34,1.56,.64,1);max-width:100%}
+  .tk-empty{grid-column:1 / -1;text-align:center;padding:18px 12px;color:var(--text3);font-size:12.5px;line-height:1.6}
+  .tk-empty button{margin-top:8px}
+
+  /* ── RÉGLAGES DES TRACKERS ── */
+  .tk-cat-grid{display:flex;flex-wrap:wrap;gap:8px}
+  .tk-chip{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);color:var(--text2);font-size:12.5px;font-weight:600;transition:all .18s;cursor:pointer}
+  .tk-chip:hover{border-color:var(--primary)}
+  .tk-chip.on{background:rgba(99,102,241,.15);border-color:var(--primary);color:var(--primary-l)}
+  .tk-chip .tk-chip-x{opacity:.6;font-size:11px}
+  .tk-custom-form{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:end}
+  .tk-custom-form .input-group{min-width:0}
+  .tk-custom-form input,.tk-custom-form select{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:8px 10px;color:var(--text1);outline:none;width:100%}
+  .tk-emoji-input{width:52px;text-align:center;font-size:18px}
+
+  /* ── GRAPHIQUES : barres à hauteur fiable (les colonnes remplissent la hauteur) ── */
+  .mini-bar-chart{height:96px}
+  .mini-bar-col{height:100%;justify-content:flex-end}
+  .mini-bar{opacity:.9}
+  .mini-bar-col:hover .mini-bar{opacity:1}
+
+  /* ── SYNTHÈSE TRACKERS (STATS) ── */
+  .tk-stat-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border2)}
+  .tk-stat-row:last-child{border-bottom:none}
+  .tk-stat-emoji{font-size:17px;width:26px;text-align:center;flex-shrink:0}
+  .tk-stat-name{font-size:12.5px;color:var(--text2);flex:1;min-width:0}
+  .tk-stat-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:var(--text1);white-space:nowrap}
+  .tk-stat-val small{color:var(--text3);font-weight:500}
+
+  @media(max-width:360px){.tk-grid{grid-template-columns:minmax(0,1fr)}}
+  `;
+  const style = document.createElement('style');
+  style.id = 'vieDynamicStyles';
+  style.textContent = css;
+  document.head.appendChild(style);
 }
 
 /* ════════════════════════════════════════════
@@ -281,6 +506,7 @@ function localLogin() {
    DÉMARRAGE / SESSIONS
 ════════════════════════════════════════════ */
 function boot() {
+  injectDynamicStyles();
   const cfg = getFirebaseConfig();
   if (cfg && typeof firebase !== 'undefined') {
     try {
@@ -379,10 +605,13 @@ function openApp() {
   // Réinitialiser le formulaire d'auth
   const pw = $('authPassword'); if (pw) pw.value = '';
   refreshIdentityUI();
+  ensureTrackerDom();
+  renderThemeGrid();
   setTheme(currentTheme, false);
   const n = new Date();
   calY = n.getFullYear(); calM = n.getMonth();
   $('topbarDate').textContent = n.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+  const av = $('appVersion'); if (av) av.textContent = 'v' + APP_VERSION;
   sv('today');
   checkBirthdays();
 }
@@ -526,6 +755,7 @@ async function pushNow() {
     const payload = JSON.parse(JSON.stringify({
       days: S.days, deleted: S.deleted || {}, planning: S.planning,
       birthdays: S.birthdays, goals: S.goals, profile: S.profile || {},
+      trackers: S.trackers || DEFAULT_TRACKERS.slice(), customTrackers: S.customTrackers || [],
       updatedAt: Date.now(), appVersion: APP_VERSION,
     }));
     lastPushedAt = payload.updatedAt;
@@ -572,6 +802,8 @@ function mergeRemote(remote) {
     birthdays: localNewer ? (local.birthdays || []) : (remote.birthdays || []),
     goals:     { ...DEFAULT_GOALS, ...(localNewer ? local.goals : remote.goals || {}) },
     profile:   localNewer ? (local.profile || {})   : (remote.profile || {}),
+    trackers:  localNewer ? (local.trackers || DEFAULT_TRACKERS.slice()) : (remote.trackers || DEFAULT_TRACKERS.slice()),
+    customTrackers: localNewer ? (local.customTrackers || []) : (remote.customTrackers || []),
   };
 }
 
@@ -588,6 +820,8 @@ function applyRemote(d) {
       birthdays: d.birthdays || [],
       goals:     { ...DEFAULT_GOALS, ...(d.goals || {}) },
       profile:   d.profile   || {},
+      trackers:  d.trackers  || DEFAULT_TRACKERS.slice(),
+      customTrackers: d.customTrackers || [],
     };
     setSyncUI('ok');
   }
@@ -713,6 +947,10 @@ function loadTodayView() {
   renderExpenses(day.expenses || []);
   renderActivities(day.activities || []);
   $('notesText').value = day.notes || '';
+
+  // Suivi d'activité personnalisable
+  ensureTrackerDom();
+  renderTrackers();
 }
 
 function renderGreeting() {
@@ -884,6 +1122,176 @@ function renderActivities(list) {
 }
 
 /* ════════════════════════════════════════════
+   SUIVI D'ACTIVITÉ PERSONNALISABLE (TRACKERS)
+════════════════════════════════════════════ */
+const SCALE_FACES = ['😣', '🙁', '😐', '🙂', '😄'];
+
+function getTracker(id) {
+  return (S.customTrackers || []).find(t => t.id === id)
+      || TRACKER_CATALOG.find(t => t.id === id);
+}
+function enabledTrackers() {
+  return (S.trackers || []).map(getTracker).filter(Boolean);
+}
+function trackerHasValue(def, v) {
+  if (v === undefined || v === null || v === '') return false;
+  if (def.type === 'check') return v === true;
+  return (+v) > 0;
+}
+
+/* Injecte la section « Suivi d'activité » dans la vue Aujourd'hui (une fois) */
+function ensureTrackerDom() {
+  const view = $('view-today');
+  if (!view || $('trackerSection')) return;
+  const sec = document.createElement('div');
+  sec.className = 'section-card';
+  sec.id = 'trackerSection';
+  const saveBtn = view.querySelector('.btn-save');
+  view.insertBefore(sec, saveBtn);
+}
+
+function renderTrackers() {
+  const sec = $('trackerSection');
+  if (!sec) return;
+  const list = enabledTrackers();
+  const day = S.days[activeDayKey()] || {};
+  const values = day.trackers || {};
+  const cards = list.length
+    ? `<div class="tk-grid">${list.map(def => trackerCardHTML(def, values[def.id], 'tk')).join('')}</div>`
+    : `<div class="tk-grid"><div class="tk-empty">Aucun suivi activé.<br>Choisissez ceux qui comptent pour vous dans les Paramètres.<br><button class="btn btn-primary btn-sm" onclick="sv('more');setTimeout(()=>{const e=document.getElementById('trackerSettings');if(e)e.scrollIntoView({behavior:'smooth'})},60)">➕ Ajouter des suivis</button></div></div>`;
+  sec.innerHTML = `
+    <div class="section-header">
+      <div class="section-icon" style="background:rgba(99,102,241,.15)">📿</div>
+      <div class="section-title">Suivi d'activité</div>
+      <button class="btn btn-ghost btn-sm" onclick="sv('more');setTimeout(()=>{const e=document.getElementById('trackerSettings');if(e)e.scrollIntoView({behavior:'smooth'})},60)" title="Personnaliser">⚙️</button>
+    </div>
+    <div class="section-body">${cards}</div>`;
+}
+
+/* Génère la carte d'un tracker. ns = préfixe des handlers ('tk' = aujourd'hui, 'etk' = modale) */
+function trackerCardHTML(def, value, ns) {
+  const c = def.color || 'var(--primary)';
+  const full = def.type === 'scale' || def.type === 'counter';
+  const done = trackerHasValue(def, value);
+  let control = '';
+  if (def.type === 'counter') {
+    const v = +value || 0;
+    control = `
+      <div class="tk-counter">
+        <button class="tk-btn" onclick="${ns}Inc('${def.id}',-1)" aria-label="Diminuer">−</button>
+        <div class="tk-counter-val">${v}${def.unit ? `<small>${esc(def.unit)}</small>` : ''}</div>
+        <button class="tk-btn" onclick="${ns}Inc('${def.id}',1)" aria-label="Augmenter">+</button>
+      </div>${goalBarHTML(def, v, ns)}`;
+  } else if (def.type === 'scale') {
+    const v = +value || 0;
+    control = `<div class="tk-scale">${SCALE_FACES.map((f, i) =>
+      `<button class="tk-dot ${v === i + 1 ? 'on' : ''}" onclick="${ns}Scale('${def.id}',${i + 1})" aria-label="${i + 1}/5">${f}</button>`).join('')}</div>`;
+  } else if (def.type === 'check') {
+    control = `<button class="tk-check-btn ${done ? 'on' : ''}" onclick="${ns}Toggle('${def.id}')">${done ? '✓ Fait' : 'À faire'}</button>`;
+  } else { // number
+    const v = (value === undefined || value === null || value === '') ? '' : value;
+    control = `
+      <div class="tk-num-wrap">
+        <input type="number" inputmode="decimal" id="${ns}_num_${def.id}" value="${esc(v)}" min="0" step="${def.step || 1}" placeholder="0" oninput="${ns}Num('${def.id}',this.value)">
+        ${def.unit ? `<span class="tk-num-unit">${esc(def.unit)}</span>` : ''}
+      </div>${goalBarHTML(def, +value || 0, ns)}`;
+  }
+  return `
+    <div class="tk-card ${full ? 'tk-full' : ''} ${done ? 'tk-done' : ''}" id="${ns}_card_${def.id}" style="--tkc:${c}">
+      <div class="tk-head">
+        <span class="tk-emoji">${def.emoji || '•'}</span>
+        <span class="tk-name">${esc(def.label)}</span>
+        <span class="tk-val" id="${ns}_val_${def.id}">${trackerBadge(def, value)}</span>
+      </div>
+      ${control}
+    </div>`;
+}
+
+function goalBarHTML(def, v, ns) {
+  if (!def.goal) return '';
+  const pct = Math.min(100, (v / def.goal) * 100);
+  return `<div class="tk-bar"><div class="tk-bar-fill" id="${ns}_bar_${def.id}" style="width:${pct}%"></div></div>`;
+}
+
+/* Petit badge de valeur affiché en haut à droite de la carte.
+   Compteurs (pleine largeur) : valeur + unité. Nombres (demi-largeur) : compact, sans unité
+   car l'unité figure déjà à côté du champ de saisie. */
+function trackerBadge(def, value) {
+  if (def.type === 'scale') return (+value > 0) ? `${value}/5` : '—';
+  if (def.type === 'check') return trackerHasValue(def, value) ? '✓' : '';
+  const v = +value || 0;
+  const shown = Number.isInteger(v) ? v : v.toFixed(1);
+  if (def.type === 'number') {
+    if (!v && !def.goal) return '—';
+    return def.goal ? `${shown}/${def.goal}` : `${shown}`;
+  }
+  // counter
+  if (def.goal) return `${shown}/${def.goal}${def.unit ? ' ' + def.unit : ''}`;
+  return `${shown}${def.unit ? ' ' + def.unit : ''}`;
+}
+
+/* Valeur lisible d'un tracker (détail du jour, historique) */
+function fmtTrackerDetail(def, val) {
+  if (def.type === 'check') return 'Fait ✓';
+  if (def.type === 'scale') return `${SCALE_FACES[(+val || 1) - 1] || ''} ${val}/5`;
+  const v = +val || 0;
+  const shown = Number.isInteger(v) ? v.toLocaleString('fr-FR') : v.toFixed(1);
+  return `${shown}${def.unit ? ' ' + def.unit : ''}${def.goal ? ' / ' + def.goal : ''}`;
+}
+
+/* Rafraîchit uniquement le badge + la barre d'une carte (sans re-render → garde le focus) */
+function updateTrackerVisual(def, value, ns) {
+  const badge = $(`${ns}_val_${def.id}`);
+  if (badge) badge.textContent = trackerBadge(def, value);
+  const bar = $(`${ns}_bar_${def.id}`);
+  if (bar && def.goal) bar.style.width = Math.min(100, ((+value || 0) / def.goal) * 100) + '%';
+  const card = $(`${ns}_card_${def.id}`);
+  if (card) card.classList.toggle('tk-done', trackerHasValue(def, value));
+}
+
+/* ── Handlers « Aujourd'hui » (écrivent dans S.days) ── */
+function tkDay() {
+  const ds = activeDayKey();
+  const d = S.days[ds] = S.days[ds] || {};
+  d.trackers = d.trackers || {};
+  return d;
+}
+function tkCommit(rerender) {
+  const d = S.days[activeDayKey()];
+  d.updatedAt = Date.now();
+  persist();
+  renderGreeting();
+  if (rerender) renderTrackers();
+}
+function tkInc(id, delta) {
+  const def = getTracker(id); if (!def) return;
+  const d = tkDay();
+  let v = (+d.trackers[id] || 0) + delta * (def.step || 1);
+  v = Math.max(0, Math.round(v * 100) / 100);
+  d.trackers[id] = v;
+  tkCommit(true);
+}
+function tkScale(id, v) {
+  const d = tkDay();
+  d.trackers[id] = (d.trackers[id] === v) ? 0 : v; // re-cliquer désélectionne
+  tkCommit(true);
+}
+function tkToggle(id) {
+  const d = tkDay();
+  d.trackers[id] = !d.trackers[id];
+  tkCommit(true);
+}
+function tkNum(id, val) {
+  const def = getTracker(id); if (!def) return;
+  const d = tkDay();
+  const n = parseFloat(val);
+  if (!Number.isFinite(n) || n < 0) delete d.trackers[id];
+  else d.trackers[id] = n;
+  updateTrackerVisual(def, d.trackers[id], 'tk');
+  tkCommit(false); // pas de re-render : conserve le focus dans le champ
+}
+
+/* ════════════════════════════════════════════
    CALENDRIER
 ════════════════════════════════════════════ */
 function renderCalendar() {
@@ -958,6 +1366,14 @@ function buildDayDetailHTML(ds) {
   if (day.activities && day.activities.length) {
     rows.push(`<div class="detail-row"><span class="detail-icon">🏷</span><span class="detail-label">Activités</span><span class="detail-value">${day.activities.map(a => esc(a.text)).join(', ')}</span></div>`);
   }
+  if (day.trackers) {
+    Object.keys(day.trackers).forEach(id => {
+      const def = getTracker(id);
+      const val = day.trackers[id];
+      if (!def || !trackerHasValue(def, val)) return;
+      rows.push(`<div class="detail-row"><span class="detail-icon">${def.emoji || '•'}</span><span class="detail-label">${esc(def.label)}</span><span class="detail-value">${esc(fmtTrackerDetail(def, val))}</span></div>`);
+    });
+  }
   if (day.notes) {
     rows.push(`<div class="detail-row"><span class="detail-icon">📝</span><span class="detail-label">Notes</span><span class="detail-value">${esc(day.notes)}</span></div>`);
   }
@@ -1006,12 +1422,14 @@ function openEditDayModal(ds) {
   editDraft.work       = editDraft.work       || {};
   editDraft.expenses   = editDraft.expenses   || [];
   editDraft.activities = editDraft.activities || [];
+  editDraft.trackers   = editDraft.trackers   || {};
 
   $('editModalTitle').textContent = '✏️ ' + prettyDate(ds);
   $('editModalContent').innerHTML = buildEditModalHTML();
 
   renderEditExpenses();
   renderEditActivities();
+  renderEditTrackers();
   updateEditWorkTotal();
 
   $('esWalkKm').addEventListener('input', () => {
@@ -1078,6 +1496,11 @@ function buildEditModalHTML() {
       </div>
     </div>
 
+    <div class="esec" id="editTrackerSec">
+      <div class="esec-title">📿 Suivi d'activité</div>
+      <div id="editTrackerList"></div>
+    </div>
+
     <div class="esec">
       <div class="esec-title">📝 Notes</div>
       <textarea id="esNotes" rows="3" placeholder="Notes…">${esc(d.notes || '')}</textarea>
@@ -1135,6 +1558,38 @@ function editAddActivity() {
 function editDeleteActivity(id) {
   editDraft.activities = editDraft.activities.filter(a => String(a.id) !== String(id));
   renderEditActivities();
+}
+
+/* Suivi d'activité dans la modale (sur le brouillon) */
+function renderEditTrackers() {
+  const el = $('editTrackerList');
+  if (!el) return;
+  const list = enabledTrackers();
+  const sec = $('editTrackerSec');
+  if (!list.length) { if (sec) sec.style.display = 'none'; return; }
+  if (sec) sec.style.display = '';
+  el.innerHTML = `<div class="tk-grid">${list.map(def => trackerCardHTML(def, editDraft.trackers[def.id], 'etk')).join('')}</div>`;
+}
+function etkInc(id, delta) {
+  const def = getTracker(id); if (!def) return;
+  let v = (+editDraft.trackers[id] || 0) + delta * (def.step || 1);
+  editDraft.trackers[id] = Math.max(0, Math.round(v * 100) / 100);
+  renderEditTrackers();
+}
+function etkScale(id, v) {
+  editDraft.trackers[id] = (editDraft.trackers[id] === v) ? 0 : v;
+  renderEditTrackers();
+}
+function etkToggle(id) {
+  editDraft.trackers[id] = !editDraft.trackers[id];
+  renderEditTrackers();
+}
+function etkNum(id, val) {
+  const def = getTracker(id); if (!def) return;
+  const n = parseFloat(val);
+  if (!Number.isFinite(n) || n < 0) delete editDraft.trackers[id];
+  else editDraft.trackers[id] = n;
+  updateTrackerVisual(def, editDraft.trackers[id], 'etk');
 }
 
 function closeEditModal() {
@@ -1239,77 +1694,239 @@ function renderHistory() {
 /* ════════════════════════════════════════════
    STATISTIQUES
 ════════════════════════════════════════════ */
-function setStatsPeriod(p, btn) {
+/* Injecte la barre de navigation + le panneau de dates personnalisées (une fois) */
+function ensureStatsDom() {
+  const row = document.querySelector('.stats-period-row');
+  if (!row) return;
+  row.id = 'statsPeriodRow';
+  if (!$('statsNavRow')) {
+    const nav = document.createElement('div');
+    nav.className = 'stats-nav-row';
+    nav.id = 'statsNavRow';
+    nav.innerHTML = `
+      <button class="stats-nav-btn" id="statsNavPrev" onclick="statsNav(-1)" aria-label="Période précédente">‹</button>
+      <div class="stats-range-label" id="statsRangeLabel">—</div>
+      <button class="stats-nav-btn" id="statsNavNext" onclick="statsNav(1)" aria-label="Période suivante">›</button>`;
+    row.insertAdjacentElement('afterend', nav);
+  }
+  if (!$('statsCustomRow')) {
+    const cr = document.createElement('div');
+    cr.className = 'stats-custom-row';
+    cr.id = 'statsCustomRow';
+    cr.style.display = 'none';
+    cr.innerHTML = `
+      <div class="input-group"><label>Du</label><input type="date" id="statsCustomStart" onchange="applyCustomRange()"></div>
+      <div class="input-group"><label>Au</label><input type="date" id="statsCustomEnd" onchange="applyCustomRange()"></div>`;
+    $('statsNavRow').insertAdjacentElement('afterend', cr);
+  }
+}
+
+const startOfWeek = d => { const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); x.setHours(0, 0, 0, 0); return x; };
+
+/* Bornes + granularité de la période courante */
+function getStatsRange() {
+  const a = new Date(statsAnchor); a.setHours(0, 0, 0, 0);
+  if (statsPeriod === 'day') {
+    return { start: new Date(a), end: new Date(a), gran: 'day', navUnit: 'day',
+      label: a.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }), sub: 'ce jour' };
+  }
+  if (statsPeriod === 'week') {
+    const s = startOfWeek(a); const e = new Date(s); e.setDate(s.getDate() + 6);
+    return { start: s, end: e, gran: 'day', navUnit: 'week',
+      label: 'Semaine du ' + s.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }), sub: 'cette semaine' };
+  }
+  if (statsPeriod === 'month') {
+    const s = new Date(a.getFullYear(), a.getMonth(), 1);
+    const e = new Date(a.getFullYear(), a.getMonth() + 1, 0);
+    return { start: s, end: e, gran: 'day', navUnit: 'month',
+      label: monthNames[a.getMonth()] + ' ' + a.getFullYear(), sub: 'ce mois-ci' };
+  }
+  if (statsPeriod === 'year') {
+    return { start: new Date(a.getFullYear(), 0, 1), end: new Date(a.getFullYear(), 11, 31), gran: 'month', navUnit: 'year',
+      label: 'Année ' + a.getFullYear(), sub: 'cette année' };
+  }
+  // custom
+  let s = statsCustom.start ? new Date(statsCustom.start + 'T00:00:00') : startOfWeek(new Date());
+  let e = statsCustom.end   ? new Date(statsCustom.end   + 'T00:00:00') : new Date();
+  s.setHours(0, 0, 0, 0); e.setHours(0, 0, 0, 0);
+  if (e < s) { const t = s; s = e; e = t; }
+  const span = Math.round((e - s) / 864e5) + 1;
+  return { start: s, end: e, gran: span > 62 ? 'month' : 'day', navUnit: null,
+    label: s.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' – ' + e.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }),
+    sub: 'sur la période' };
+}
+
+/* Liste des jours de la période (bornée à aujourd'hui, pas de futur) */
+function getStatsDays(range) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const end = range.end > today ? today : range.end;
+  const out = [];
+  const d = new Date(range.start); d.setHours(0, 0, 0, 0);
+  let guard = 0;
+  while (d <= end && guard++ < 4000) { out.push(fmtDate(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+
+function setStatsPeriod(p) {
   statsPeriod = p;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  if (p !== 'custom') statsAnchor = new Date();
   renderStats();
 }
 
-function getStatsDays() {
-  const now = new Date(), entries = [];
-  if (statsPeriod === 'week') {
-    const dow = (now.getDay() + 6) % 7;
-    for (let i = 0; i < 7; i++) { const d = new Date(now); d.setDate(now.getDate() - dow + i); entries.push(fmtDate(d)); }
-  } else if (statsPeriod === 'month') {
-    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    for (let i = 1; i <= days; i++) entries.push(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(i)}`);
-  } else {
-    for (let m = 0; m < 12; m++) {
-      const days = new Date(now.getFullYear(), m + 1, 0).getDate();
-      for (let i = 1; i <= days; i++) { const dd = new Date(now.getFullYear(), m, i); if (dd <= now) entries.push(fmtDate(dd)); }
+function statsNav(dir) {
+  const u = getStatsRange().navUnit;
+  const a = new Date(statsAnchor);
+  if (u === 'day')        a.setDate(a.getDate() + dir);
+  else if (u === 'week')  a.setDate(a.getDate() + 7 * dir);
+  else if (u === 'month') a.setMonth(a.getMonth() + dir);
+  else if (u === 'year')  a.setFullYear(a.getFullYear() + dir);
+  else return;
+  statsAnchor = a;
+  renderStats();
+}
+
+function applyCustomRange() {
+  statsCustom.start = $('statsCustomStart').value;
+  statsCustom.end   = $('statsCustomEnd').value;
+  renderStats();
+}
+
+function renderStatsControls(range) {
+  ensureStatsDom();
+  const row = $('statsPeriodRow');
+  const periods = [['day', 'Jour'], ['week', 'Semaine'], ['month', 'Mois'], ['year', 'Année'], ['custom', 'Perso']];
+  row.innerHTML = periods.map(([p, l]) =>
+    `<button class="period-btn ${statsPeriod === p ? 'active' : ''}" onclick="setStatsPeriod('${p}')">${l}</button>`).join('');
+
+  const isCustom = statsPeriod === 'custom';
+  $('statsNavRow').style.display    = isCustom ? 'none' : 'flex';
+  $('statsCustomRow').style.display = isCustom ? 'flex' : 'none';
+
+  if (isCustom) {
+    if (!statsCustom.start || !statsCustom.end) {
+      const e = new Date(), s = new Date(); s.setDate(s.getDate() - 29);
+      statsCustom.start = statsCustom.start || fmtDate(s);
+      statsCustom.end   = statsCustom.end   || fmtDate(e);
     }
+    $('statsCustomStart').value = statsCustom.start;
+    $('statsCustomEnd').value   = statsCustom.end;
+  } else {
+    $('statsRangeLabel').textContent = range.label;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    $('statsNavNext').disabled = range.end >= today;
   }
-  return entries;
 }
 
 function renderStats() {
-  const days = getStatsDays();
-  let totalSport = 0, totalKm = 0, totalSteps = 0, totalMoney = 0, totalWork = 0, sportDays = 0;
-  const sportByDay = [], workByDay = [], moneyByDay = [];
+  // Garantir des bornes personnalisées cohérentes AVANT de calculer la période
+  if (statsPeriod === 'custom' && (!statsCustom.start || !statsCustom.end)) {
+    const e = new Date(), s = new Date(); s.setDate(s.getDate() - 29);
+    statsCustom.start = statsCustom.start || fmtDate(s);
+    statsCustom.end   = statsCustom.end   || fmtDate(e);
+  }
+  const range = getStatsRange();
+  renderStatsControls(range);
+  const days = getStatsDays(range);
 
+  let totalSport = 0, totalKm = 0, totalSteps = 0, totalMoney = 0, totalWork = 0, sportDays = 0;
   days.forEach(ds => {
     const day = S.days[ds] || {};
-    const s     = (day.sport && day.sport.time) || 0;
-    const km    = (day.walk && day.walk.km) || 0;
-    const steps = (day.walk && day.walk.steps) || 0;
-    const money = (day.expenses || []).reduce((a, e) => a + (+e.amount || 0), 0);
-    const work  = (day.work && day.work.total) || 0;
-    totalSport += s; totalKm += km; totalSteps += steps; totalMoney += money; totalWork += work;
-    if (s > 0 || (day.sport && day.sport.done)) sportDays++;
-    sportByDay.push({ date: ds, val: s });
-    workByDay.push({ date: ds, val: work / 60 });
-    moneyByDay.push({ date: ds, val: money });
+    totalSport += (day.sport && day.sport.time) || 0;
+    totalKm    += (day.walk && day.walk.km) || 0;
+    totalSteps += (day.walk && day.walk.steps) || 0;
+    totalMoney += (day.expenses || []).reduce((a, e) => a + (+e.amount || 0), 0);
+    totalWork  += (day.work && day.work.total) || 0;
+    if (((day.sport && day.sport.time) || 0) > 0 || (day.sport && day.sport.done)) sportDays++;
   });
 
-  const periodLabel = statsPeriod === 'week' ? 'cette semaine' : statsPeriod === 'month' ? 'ce mois-ci' : 'cette année';
-
+  const sub = range.sub;
   $('statsGrid').innerHTML = `
-    <div class="stat-tile"><div class="stat-tile-icon">🏃</div><div class="stat-tile-label">Sport</div><div class="stat-tile-val sv-sport">${totalSport} min</div><div class="stat-tile-sub">${sportDays} séance${sportDays > 1 ? 's' : ''} ${periodLabel}</div></div>
+    <div class="stat-tile"><div class="stat-tile-icon">🏃</div><div class="stat-tile-label">Sport</div><div class="stat-tile-val sv-sport">${totalSport} min</div><div class="stat-tile-sub">${sportDays} séance${sportDays > 1 ? 's' : ''} ${sub}</div></div>
     <div class="stat-tile"><div class="stat-tile-icon">🚶</div><div class="stat-tile-label">Marche</div><div class="stat-tile-val sv-walk">${totalKm.toFixed(1)} km</div><div class="stat-tile-sub">${totalSteps.toLocaleString('fr-FR')} pas</div></div>
-    <div class="stat-tile"><div class="stat-tile-icon">💼</div><div class="stat-tile-label">Travail</div><div class="stat-tile-val sv-work">${minToHM(totalWork)}</div><div class="stat-tile-sub">${periodLabel}</div></div>
-    <div class="stat-tile"><div class="stat-tile-icon">💰</div><div class="stat-tile-label">Dépenses</div><div class="stat-tile-val sv-money">${fmtMoney(totalMoney)}</div><div class="stat-tile-sub">${periodLabel}</div></div>
+    <div class="stat-tile"><div class="stat-tile-icon">💼</div><div class="stat-tile-label">Travail</div><div class="stat-tile-val sv-work">${minToHM(totalWork)}</div><div class="stat-tile-sub">${sub}</div></div>
+    <div class="stat-tile"><div class="stat-tile-icon">💰</div><div class="stat-tile-label">Dépenses</div><div class="stat-tile-val sv-money">${fmtMoney(totalMoney)}</div><div class="stat-tile-sub">${sub}</div></div>
   `;
 
-  const maxSport = Math.max(...sportByDay.map(d => d.val), 1);
-  const maxWork  = Math.max(...workByDay.map(d => d.val), 1);
-  const maxMoney = Math.max(...moneyByDay.map(d => d.val), 1);
-  const show = data => statsPeriod === 'year' ? data.filter((_, i, a) => i % Math.ceil(a.length / 12) === 0) : data;
+  const sportSeries = aggregateSeries(days, day => (day.sport && day.sport.time) || 0, range);
+  const stepsSeries = aggregateSeries(days, day => (day.walk && day.walk.steps) || 0, range);
+  const workSeries  = aggregateSeries(days, day => ((day.work && day.work.total) || 0) / 60, range);
+  const moneySeries = aggregateSeries(days, day => (day.expenses || []).reduce((a, e) => a + (+e.amount || 0), 0), range);
 
-  $('statsCharts').innerHTML = `
-    ${renderMiniChart('Sport (min)', show(sportByDay), maxSport, 'var(--sport)')}
-    ${renderMiniChart('Travail (h)', show(workByDay), maxWork, 'var(--work)')}
-    ${renderMiniChart('Dépenses (€)', show(moneyByDay), maxMoney, 'var(--money)')}
-  `;
+  $('statsCharts').innerHTML =
+      renderMiniChart('Sport', sportSeries, 'var(--sport)', v => Math.round(v) + ' min')
+    + renderMiniChart('Marche', stepsSeries, 'var(--walk)', v => Math.round(v).toLocaleString('fr-FR') + ' pas')
+    + renderMiniChart('Travail', workSeries, 'var(--work)', v => v.toFixed(1) + ' h')
+    + renderMiniChart('Dépenses', moneySeries, 'var(--money)', v => fmtMoney(v))
+    + renderTrackerStats(days);
 }
 
-function renderMiniChart(title, data, maxV, color) {
-  const bars = data.map(d => {
+/* Regroupe les jours en barres — par jour, ou par mois pour les longues périodes */
+function aggregateSeries(days, valueFn, range) {
+  if (range.gran === 'month') {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const end = range.end > today ? today : range.end;
+    const buckets = [], idx = {};
+    const d = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
+    let guard = 0;
+    while (d <= end && guard++ < 120) {
+      idx[d.getFullYear() + '-' + pad(d.getMonth() + 1)] = buckets.length;
+      buckets.push({ label: monthNames[d.getMonth()].slice(0, 3), val: 0 });
+      d.setMonth(d.getMonth() + 1);
+    }
+    days.forEach(ds => {
+      const k = ds.slice(0, 7);
+      if (idx[k] !== undefined) buckets[idx[k]].val += valueFn(S.days[ds] || {});
+    });
+    return buckets;
+  }
+  return days.map(ds => ({
+    label: new Date(ds + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }),
+    val: valueFn(S.days[ds] || {}),
+  }));
+}
+
+function renderMiniChart(title, data, color, fmt) {
+  if (!data.length) return `<div class="chart-card"><div class="chart-title">${title}</div><div class="empty-mini">Aucune donnée sur cette période.</div></div>`;
+  const maxV = Math.max(...data.map(d => d.val), 1);
+  const total = data.reduce((s, d) => s + d.val, 0);
+  const step = Math.ceil(data.length / 13);
+  const bars = data.map((d, i) => {
     const pct = maxV > 0 ? Math.max((d.val / maxV) * 100, d.val > 0 ? 4 : 0) : 0;
-    const lbl = new Date(d.date + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
-    return `<div class="mini-bar-col"><div class="mini-bar" style="height:${pct}%;background:${color};opacity:.85"></div><div class="mini-bar-lbl">${lbl}</div></div>`;
+    const showLbl = data.length <= 13 || i % step === 0;
+    return `<div class="mini-bar-col" title="${esc(d.label + ' · ' + fmt(d.val))}"><div class="mini-bar" style="height:${pct}%;background:${color};opacity:.85"></div><div class="mini-bar-lbl">${showLbl ? d.label : ''}</div></div>`;
   }).join('');
-  return `<div class="chart-card"><div class="chart-title">${title}</div><div class="mini-bar-chart">${bars}</div></div>`;
+  return `<div class="chart-card"><div class="chart-title">${title} · <span style="color:var(--text3);font-weight:400">${fmt(total)} au total</span></div><div class="mini-bar-chart">${bars}</div></div>`;
+}
+
+/* Synthèse des suivis d'activité sur la période */
+function renderTrackerStats(days) {
+  const defs = enabledTrackers();
+  if (!defs.length) return '';
+  const rows = defs.map(def => {
+    let sum = 0, cnt = 0, doneDays = 0;
+    days.forEach(ds => {
+      const v = ((S.days[ds] || {}).trackers || {})[def.id];
+      if (!trackerHasValue(def, v)) return;
+      cnt++;
+      if (def.type === 'check') doneDays++;
+      else if (def.type === 'scale') sum += (+v || 0);
+      else { sum += (+v || 0); doneDays++; }
+    });
+    let valStr;
+    if (def.type === 'check') {
+      valStr = `${doneDays} <small>jour${doneDays > 1 ? 's' : ''}</small>`;
+    } else if (def.type === 'scale') {
+      const avg = cnt ? sum / cnt : 0;
+      valStr = cnt ? `${avg.toFixed(1)}<small>/5</small> ${SCALE_FACES[Math.round(avg) - 1] || ''}` : '—';
+    } else {
+      const avg = cnt ? sum / cnt : 0;
+      const sumStr = Number.isInteger(sum) ? sum.toLocaleString('fr-FR') : sum.toFixed(1);
+      const avgStr = Number.isInteger(avg) ? avg : avg.toFixed(1);
+      valStr = cnt ? `${sumStr}${def.unit ? ' ' + def.unit : ''} <small>(∅ ${avgStr}/j)</small>` : '—';
+    }
+    return `<div class="tk-stat-row"><span class="tk-stat-emoji">${def.emoji || '•'}</span><span class="tk-stat-name">${esc(def.label)}</span><span class="tk-stat-val">${valStr}</span></div>`;
+  }).join('');
+  return `<div class="chart-card"><div class="chart-title">📿 Suivi d'activité</div>${rows}</div>`;
 }
 
 /* ════════════════════════════════════════════
@@ -1530,10 +2147,117 @@ function renderGoals() {
 }
 
 /* ════════════════════════════════════════════
+   RÉGLAGES DES SUIVIS D'ACTIVITÉ
+════════════════════════════════════════════ */
+function ensureTrackerSettingsDom() {
+  if ($('trackerSettings')) return;
+  const grid = document.querySelector('.theme-grid');
+  const themeSec = grid ? grid.closest('.settings-section') : null;
+  const sec = document.createElement('div');
+  sec.className = 'settings-section';
+  sec.id = 'trackerSettings';
+  if (themeSec && themeSec.parentNode) themeSec.parentNode.insertBefore(sec, themeSec.nextSibling);
+  else { const v = $('view-more'); if (v) v.appendChild(sec); }
+}
+
+function renderTrackerSettings() {
+  ensureTrackerSettingsDom();
+  const sec = $('trackerSettings');
+  if (!sec) return;
+  const enabled = new Set(S.trackers || []);
+  const custom = S.customTrackers || [];
+  const all = [...TRACKER_CATALOG, ...custom];
+  const enabledDefs = (S.trackers || []).map(getTracker).filter(Boolean);
+  const disabledDefs = all.filter(d => !enabled.has(d.id));
+  const isCustom = d => custom.some(c => c.id === d.id);
+  const chip = (d, on) => `
+    <button class="tk-chip ${on ? 'on' : ''}" onclick="toggleTracker('${d.id}')">
+      <span>${d.emoji || '•'}</span><span>${esc(d.label)}</span>
+      ${on ? '<span class="tk-chip-x">✓</span>' : ''}
+      ${isCustom(d) ? `<span class="tk-chip-x" onclick="event.stopPropagation();deleteCustomTracker('${d.id}')" title="Supprimer" style="cursor:pointer">🗑</span>` : ''}
+    </button>`;
+  sec.innerHTML = `
+    <div class="settings-label">📿 Suivi d'activité</div>
+    <p class="view-desc" style="margin:0">Cochez les suivis à afficher dans « Aujourd'hui ». <strong>${enabledDefs.length}</strong> activé${enabledDefs.length > 1 ? 's' : ''}.</p>
+    <div class="tk-cat-grid">
+      ${enabledDefs.map(d => chip(d, true)).join('')}
+      ${disabledDefs.map(d => chip(d, false)).join('')}
+    </div>
+    <details style="margin-top:4px">
+      <summary style="font-size:12px;color:var(--text2);cursor:pointer;font-weight:600">➕ Créer un suivi personnalisé</summary>
+      <div class="tk-custom-form" style="margin-top:10px">
+        <div class="input-group"><label>Emoji</label><input type="text" id="tkNewEmoji" class="tk-emoji-input" maxlength="2" placeholder="🎯"></div>
+        <div class="input-group"><label>Nom du suivi</label><input type="text" id="tkNewLabel" maxlength="24" placeholder="Ex : Yoga"></div>
+        <div class="input-group"><label>Type</label>
+          <select id="tkNewType">
+            <option value="check">Oui / Non</option>
+            <option value="counter">Compteur (±)</option>
+            <option value="number">Valeur libre</option>
+            <option value="scale">Note sur 5</option>
+          </select>
+        </div>
+      </div>
+      <div class="tk-custom-form" style="margin-top:8px">
+        <div class="input-group"><label>Unité (option.)</label><input type="text" id="tkNewUnit" maxlength="10" placeholder="min, verres…"></div>
+        <div class="input-group"><label>Objectif (option.)</label><input type="number" id="tkNewGoal" min="0" placeholder="—"></div>
+        <button class="btn btn-primary btn-sm" onclick="addCustomTracker()" style="align-self:end">Ajouter</button>
+      </div>
+    </details>`;
+}
+
+function toggleTracker(id) {
+  S.trackers = S.trackers || [];
+  const i = S.trackers.indexOf(id);
+  if (i >= 0) S.trackers.splice(i, 1);
+  else S.trackers.push(id);
+  persist();
+  renderTrackerSettings();
+  renderTrackers();
+}
+
+function addCustomTracker() {
+  const label = $('tkNewLabel').value.trim();
+  if (!label) { showToast('⚠️ Donnez un nom au suivi'); $('tkNewLabel').focus(); return; }
+  const type  = $('tkNewType').value;
+  const emoji = $('tkNewEmoji').value.trim() || '⭐';
+  const unit  = $('tkNewUnit').value.trim();
+  const goal  = parseFloat($('tkNewGoal').value);
+  const def = { id: 'custom_' + uid(), emoji, label, type, color: '#6366F1' };
+  if (unit) def.unit = unit;
+  if (Number.isFinite(goal) && goal > 0) def.goal = goal;
+  if (type === 'counter') def.step = 1;
+  if (type === 'number')  def.step = unit === 'h' ? 0.5 : 1;
+  S.customTrackers = S.customTrackers || [];
+  S.customTrackers.push(def);
+  S.trackers = S.trackers || [];
+  S.trackers.push(def.id);
+  persist();
+  renderTrackerSettings();
+  renderTrackers();
+  showToast('✅ Suivi « ' + label + ' » ajouté');
+}
+
+async function deleteCustomTracker(id) {
+  const def = getTracker(id);
+  const ok = await confirmDialog({
+    title: 'Supprimer ce suivi ?',
+    message: (def ? def.label : '') + '\nLes valeurs déjà notées dans vos journées seront conservées mais masquées.',
+    okLabel: 'Supprimer', icon: '🗑',
+  });
+  if (!ok) return;
+  S.customTrackers = (S.customTrackers || []).filter(t => t.id !== id);
+  S.trackers = (S.trackers || []).filter(t => t !== id);
+  persist();
+  renderTrackerSettings();
+  renderTrackers();
+}
+
+/* ════════════════════════════════════════════
    PARAMÈTRES
 ════════════════════════════════════════════ */
 function renderSettings() {
-  document.querySelectorAll('.theme-opt').forEach(el => el.classList.toggle('active', el.dataset.theme === currentTheme));
+  renderThemeGrid();
+  renderTrackerSettings();
   $('cloudTools').style.display = mode === 'cloud' ? '' : 'none';
 
   const box = $('accountBox');
@@ -1649,10 +2373,15 @@ function exportJSON() {
 
 function exportCSV() {
   const csvQuote = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const hdr = 'Date,Sport fait,Sport min,Sport type,Marche km,Pas,Travail début,Travail fin,Pause min,Travail total (h),Dépenses €,Activités,Notes\n';
+  const hdr = 'Date,Sport fait,Sport min,Sport type,Marche km,Pas,Travail début,Travail fin,Pause min,Travail total (h),Dépenses €,Activités,Suivis,Notes\n';
   const rows = Object.entries(S.days).sort(([a], [b]) => a.localeCompare(b)).map(([ds, d]) => {
     const money = (d.expenses || []).reduce((s, e) => s + (+e.amount || 0), 0);
     const acts  = (d.activities || []).map(a => a.text).join(' | ');
+    const trk = Object.keys(d.trackers || {}).map(id => {
+      const def = getTracker(id);
+      const v = d.trackers[id];
+      return (def && trackerHasValue(def, v)) ? `${def.label}: ${fmtTrackerDetail(def, v)}` : '';
+    }).filter(Boolean).join(' | ');
     return [
       ds,
       d.sport && d.sport.done ? 'Oui' : 'Non',
@@ -1666,6 +2395,7 @@ function exportCSV() {
       (((d.work && d.work.total) || 0) / 60).toFixed(2),
       money.toFixed(2),
       csvQuote(acts),
+      csvQuote(trk),
       csvQuote(d.notes || ''),
     ].join(',');
   }).join('\n');
@@ -1692,11 +2422,13 @@ function importJSON(e) {
         okLabel: 'Importer', icon: '📥',
       });
       if (!ok) return;
-      if (imp.days)      S.days      = imp.days;
-      if (imp.deleted)   S.deleted   = imp.deleted;
-      if (imp.planning)  S.planning  = imp.planning;
-      if (imp.birthdays) S.birthdays = imp.birthdays;
-      if (imp.goals)     S.goals     = { ...DEFAULT_GOALS, ...imp.goals };
+      if (imp.days)           S.days           = imp.days;
+      if (imp.deleted)        S.deleted        = imp.deleted;
+      if (imp.planning)       S.planning       = imp.planning;
+      if (imp.birthdays)      S.birthdays      = imp.birthdays;
+      if (imp.goals)          S.goals          = { ...DEFAULT_GOALS, ...imp.goals };
+      if (imp.trackers)       S.trackers       = imp.trackers;
+      if (imp.customTrackers) S.customTrackers = imp.customTrackers;
       persist();
       renderActiveView();
       showToast('✅ Données importées !');
