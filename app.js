@@ -354,6 +354,82 @@ function getFirebaseConfig() {
   return null;
 }
 
+/* ── PROPAGATION AUTOMATIQUE DE LA CONFIG SUR LES AUTRES APPAREILS ──
+   La config web Firebase est publique (la sécurité = auth + règles Firestore),
+   on peut donc la partager sans risque pour éviter de la ressaisir partout. */
+const FB_KEYS = ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId','measurementId','databaseURL'];
+
+function activeFbConfigClean() {
+  const cfg = getFirebaseConfig();
+  if (!cfg) return null;
+  const clean = {};
+  FB_KEYS.forEach(k => { if (cfg[k]) clean[k] = cfg[k]; });
+  return (clean.apiKey && clean.projectId) ? clean : null;
+}
+
+/* Contenu prêt à déployer d'un fichier firebase-config.js */
+function firebaseConfigFileContent(clean) {
+  return `/* firebase-config.js — déposez ce fichier à côté de index.html sur votre hébergement.
+   Il rend la synchronisation automatique : sur chaque appareil, il suffit de se
+   connecter avec son e-mail — plus besoin de coller la configuration.
+   (La configuration web Firebase est publique par conception : la sécurité vient
+   de l'authentification et des règles Firestore, pas du secret.) */
+window.FIREBASE_CONFIG = ${JSON.stringify(clean, null, 2)};
+`;
+}
+
+function downloadFirebaseConfigFile() {
+  const clean = activeFbConfigClean();
+  if (!clean) { showToast('⚠️ Aucune configuration Firebase active'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([firebaseConfigFileContent(clean)], { type: 'text/javascript' }));
+  a.download = 'firebase-config.js';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('📄 firebase-config.js téléchargé — déployez-le avec l\'app', 3400);
+}
+
+async function copyFirebaseConfigFile() {
+  const clean = activeFbConfigClean();
+  if (!clean) { showToast('⚠️ Aucune configuration Firebase active'); return; }
+  try { await navigator.clipboard.writeText(firebaseConfigFileContent(clean)); showToast('📋 Contenu copié'); }
+  catch (e) { showToast('❌ Copie impossible ici — utilisez « Générer »'); }
+}
+
+/* Lien de connexion : encode la config dans le fragment (#setup=…), jamais envoyé au serveur */
+function buildSetupLink() {
+  const clean = activeFbConfigClean();
+  if (!clean) return null;
+  const enc = btoa(unescape(encodeURIComponent(JSON.stringify(clean))));
+  return location.origin + location.pathname + '#setup=' + enc;
+}
+
+async function copySetupLink() {
+  const link = buildSetupLink();
+  if (!link) { showToast('⚠️ Aucune configuration Firebase active'); return; }
+  try { await navigator.clipboard.writeText(link); showToast('🔗 Lien copié — ouvrez-le sur l\'autre appareil', 3400); }
+  catch (e) { prompt('Copiez ce lien et ouvrez-le sur l\'autre appareil :', link); }
+}
+
+/* Au démarrage : si l'URL contient #setup=…, appliquer la config puis nettoyer l'URL */
+function importConfigFromHash() {
+  const hash = location.hash || '';
+  try {
+    const m = hash.match(/setup=([^&]+)/);
+    if (m) {
+      const cfg = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+      if (cfg && cfg.apiKey && cfg.projectId) {
+        const clean = {};
+        FB_KEYS.forEach(k => { if (cfg[k]) clean[k] = cfg[k]; });
+        localStorage.setItem('vieFirebaseConfig', JSON.stringify(clean));
+      }
+    }
+  } catch (e) {}
+  if (hash.indexOf('setup=') >= 0) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
+}
+
 function applyFbConfigText(text, errTargetId) {
   let cfg;
   try { cfg = JSON.parse(text.trim()); }
@@ -507,6 +583,7 @@ function localLogin() {
 ════════════════════════════════════════════ */
 function boot() {
   injectDynamicStyles();
+  importConfigFromHash();
   const cfg = getFirebaseConfig();
   if (cfg && typeof firebase !== 'undefined') {
     try {
@@ -2255,10 +2332,37 @@ async function deleteCustomTracker(id) {
 /* ════════════════════════════════════════════
    PARAMÈTRES
 ════════════════════════════════════════════ */
+/* Outils de propagation de la config (injectés dans la section Synchronisation) */
+function ensureCloudSyncTools() {
+  const box = $('cloudTools');
+  if (!box || $('cloudSyncTools')) return;
+  const w = document.createElement('div');
+  w.id = 'cloudSyncTools';
+  w.style.cssText = 'margin-top:8px;border-top:1px solid var(--border2);padding-top:12px;display:flex;flex-direction:column;gap:10px';
+  w.innerHTML = `
+    <div class="settings-label" style="font-size:13px">📲 Connecter automatiquement vos autres appareils</div>
+    <p class="view-desc" style="margin:0">La configuration Firebase est <strong>publique et sans risque</strong> à intégrer (la sécurité vient de votre mot de passe et des règles Firestore). Deux façons d'éviter de la ressaisir :</p>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="view-desc" style="margin:0"><strong>1 · Définitif</strong> — déposez <code>firebase-config.js</code> à côté de <code>index.html</code> sur votre hébergement : tous les appareils (présents et futurs) seront configurés d'office.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="downloadFirebaseConfigFile()">📄 Générer firebase-config.js</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyFirebaseConfigFile()">📋 Copier le contenu</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="view-desc" style="margin:0"><strong>2 · Sans hébergement</strong> — ouvrez ce lien une fois sur l'autre appareil : il applique la configuration automatiquement, puis il ne reste qu'à se connecter.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="copySetupLink()">🔗 Copier le lien de connexion</button>
+      </div>
+    </div>`;
+  box.appendChild(w);
+}
+
 function renderSettings() {
   renderThemeGrid();
   renderTrackerSettings();
   $('cloudTools').style.display = mode === 'cloud' ? '' : 'none';
+  if (mode === 'cloud') ensureCloudSyncTools();
 
   const box = $('accountBox');
   if (!currentUser) { box.innerHTML = ''; return; }
