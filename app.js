@@ -8,12 +8,12 @@
 'use strict';
 
 /* ── CONSTANTES ── */
-const APP_VERSION   = '2.0.0';
+const APP_VERSION   = '2.0.1';
 const STEPS_PER_KM  = 1300;
 const DEFAULT_GOALS = { steps: 10000, sport: 150, budget: 500, work: 35 };
 
 function newState() {
-  return { days: {}, planning: {}, birthdays: [], goals: { ...DEFAULT_GOALS }, profile: {} };
+  return { days: {}, deleted: {}, planning: {}, birthdays: [], goals: { ...DEFAULT_GOALS }, profile: {} };
 }
 
 /* ── ÉTAT GLOBAL ── */
@@ -27,12 +27,14 @@ let calY, calM;
 
 /* Firebase */
 let fbAuth = null, fbDb = null, unsubData = null;
-let pushTimer = null, lastPushedAt = 0, pendingSignupName = '';
+let pushTimer = null, pushPending = false, lastPushedAt = 0, pendingSignupName = '';
+let lastLocalEditAt = 0, lastSyncedEditAt = 0;
 
 /* ── HELPERS ── */
 const $   = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const numOr = (v, def) => { const n = parseFloat(v); return Number.isFinite(n) ? n : def; };
 
 /* ── TOAST ── */
 let _tt;
@@ -300,9 +302,20 @@ function boot() {
     fbAuth.onAuthStateChanged(user => {
       const isFirst = first; first = false;
       if (user) { enterCloud(user); return; }
-      // Pas de session cloud : reprendre une éventuelle session locale
+      // Déconnexion externe (autre onglet, jeton révoqué) : nettoyer la session
+      if (mode === 'cloud') {
+        stopCloudListener();
+        mode = null; currentUser = null; S = newState();
+        showAuth();
+        return;
+      }
+      // Pas de session cloud : reprendre une éventuelle session locale.
+      // (uniquement un vrai mode local choisi, ou une installation v1 qui
+      // n'a jamais eu de compte cloud)
       const localName = localStorage.getItem('vieUser');
-      if (isFirst && localName && localStorage.getItem('vieMode') !== 'cloud') { enterLocal(localName); return; }
+      const vieMode = localStorage.getItem('vieMode');
+      const canResumeLocal = vieMode === 'local' || (!vieMode && !localStorage.getItem('vieHadCloud'));
+      if (isFirst && localName && canResumeLocal) { enterLocal(localName); return; }
       if (mode !== 'local') showAuth();
     });
     // Garde-fou : si l'auth ne répond pas (réseau), afficher l'écran de connexion
@@ -343,6 +356,7 @@ function enterCloud(user) {
   if (mode === 'cloud' && currentUser && currentUser.uid === user.uid) return; // déjà connecté
   mode = 'cloud';
   localStorage.setItem('vieMode', 'cloud');
+  localStorage.setItem('vieHadCloud', '1');
   currentUser = {
     uid:   user.uid,
     email: user.email || '',
@@ -390,6 +404,10 @@ async function logout() {
   });
   if (!ok) return;
   closeMenu();
+  // Ne pas perdre les modifications encore en file d'attente
+  if (mode === 'cloud' && (pushPending || lastLocalEditAt > lastSyncedEditAt)) {
+    await pushNow();
+  }
   stopCloudListener();
   const wasCloud = mode === 'cloud';
   mode = null; currentUser = null; S = newState();
@@ -429,6 +447,7 @@ function loadLocal(key) {
 
 function persist() {
   if (!currentUser) return;
+  lastLocalEditAt = Date.now();
   try {
     const key = mode === 'cloud' ? cacheKey() : 'vie_data_' + currentUser.name;
     localStorage.setItem(key, JSON.stringify(S));
@@ -442,11 +461,15 @@ function startCloudListener() {
   stopCloudListener();
   unsubData = userDocRef().onSnapshot(snap => {
     if (snap.metadata.hasPendingWrites) return;       // notre propre écriture
-    if (!snap.exists) { firstCloudInit(); return; }   // premier appareil
+    if (!snap.exists) {
+      // Hors-ligne avec cache vide : on ne sait rien, ne surtout pas initialiser
+      if (snap.metadata.fromCache) return;
+      firstCloudInit();                               // compte réellement vierge
+      return;
+    }
     const d = snap.data() || {};
     if (d.updatedAt && d.updatedAt === lastPushedAt) { setSyncUI('ok'); return; }
     applyRemote(d);
-    setSyncUI('ok');
   }, err => {
     console.error('Sync:', err);
     setSyncUI('error', err.message);
@@ -457,15 +480,19 @@ function stopCloudListener() {
   clearTimeout(pushTimer);
 }
 
-/* Premier passage sur un compte vide : importer les éventuelles données locales */
-function firstCloudInit() {
+/* Premier passage sur un compte vierge : importer les éventuelles données
+   locales de l'appareil, une seule fois, et uniquement si l'état est vide. */
+async function firstCloudInit() {
   const legacyName = localStorage.getItem('vieUser');
-  const legacyRaw  = legacyName ? localStorage.getItem('vie_data_' + legacyName) : null;
-  if (legacyRaw) {
+  const legacyKey  = legacyName ? 'vie_data_' + legacyName : null;
+  const legacyRaw  = legacyKey ? localStorage.getItem(legacyKey) : null;
+  let imported = false;
+  if (legacyRaw && !Object.keys(S.days).length) {
     try {
       const d = JSON.parse(legacyRaw);
       if (d && d.days && Object.keys(d.days).length) {
         S = { ...newState(), ...d, goals: { ...DEFAULT_GOALS, ...(d.goals || {}) }, profile: { ...(d.profile || {}) } };
+        imported = true;
         showToast('📦 Données locales importées dans votre compte', 3200);
         renderActiveView();
       }
@@ -473,42 +500,97 @@ function firstCloudInit() {
   }
   if (!S.profile) S.profile = {};
   if (!S.profile.name) S.profile.name = currentUser.name;
-  pushNow();
+  const ok = await pushNow();
+  if (ok && imported) {
+    // Migration terminée : ne plus jamais réimporter ces données (ni les
+    // injecter dans le compte de quelqu'un d'autre sur le même appareil)
+    localStorage.removeItem(legacyKey);
+    localStorage.removeItem('vieUser');
+  }
 }
 
 function schedulePush() {
   if (mode !== 'cloud' || !fbDb) return;
   setSyncUI('syncing');
+  pushPending = true;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(pushNow, 1200);
 }
 
 async function pushNow() {
-  if (mode !== 'cloud' || !fbDb || !currentUser || !currentUser.uid) return;
+  if (mode !== 'cloud' || !fbDb || !currentUser || !currentUser.uid) return false;
   clearTimeout(pushTimer);
   try {
+    pruneTombstones();
+    const editStamp = lastLocalEditAt;
     const payload = JSON.parse(JSON.stringify({
-      days: S.days, planning: S.planning, birthdays: S.birthdays,
-      goals: S.goals, profile: S.profile || {},
+      days: S.days, deleted: S.deleted || {}, planning: S.planning,
+      birthdays: S.birthdays, goals: S.goals, profile: S.profile || {},
       updatedAt: Date.now(), appVersion: APP_VERSION,
     }));
     lastPushedAt = payload.updatedAt;
     await userDocRef().set(payload);
+    lastSyncedEditAt = editStamp;
+    pushPending = false;
     setSyncUI('ok');
+    return true;
   } catch (e) {
     console.error('Push:', e);
     setSyncUI('error', e.message);
+    return false;
   }
 }
 
-function applyRemote(d) {
-  S = {
-    days:      d.days      || {},
-    planning:  d.planning  || {},
-    birthdays: d.birthdays || [],
-    goals:     { ...DEFAULT_GOALS, ...(d.goals || {}) },
-    profile:   d.profile   || {},
+/* Purge des marqueurs de suppression de plus de 90 jours */
+function pruneTombstones() {
+  const limit = Date.now() - 90 * 864e5;
+  const t = S.deleted || {};
+  Object.keys(t).forEach(k => { if (t[k] < limit) delete t[k]; });
+}
+
+/* Fusion jour par jour quand des modifications locales n'ont pas encore été
+   envoyées : le jour le plus récent gagne, les suppressions sont respectées. */
+function mergeRemote(remote) {
+  const local = S;
+  const deleted = { ...(remote.deleted || {}) };
+  Object.entries(local.deleted || {}).forEach(([ds, t]) => {
+    deleted[ds] = Math.max(t, deleted[ds] || 0);
+  });
+  const days = {};
+  const allDs = new Set([...Object.keys(local.days || {}), ...Object.keys(remote.days || {})]);
+  allDs.forEach(ds => {
+    const l = (local.days || {})[ds], r = (remote.days || {})[ds];
+    const lt = l ? (l.updatedAt || 0) : -1;
+    const rt = r ? (r.updatedAt || 0) : -1;
+    const best = lt >= rt ? l : r;
+    if (best && Math.max(lt, rt) >= (deleted[ds] || 0)) days[ds] = best;
+  });
+  const localNewer = lastLocalEditAt > (remote.updatedAt || 0);
+  return {
+    days, deleted,
+    planning:  localNewer ? (local.planning || {})  : (remote.planning || {}),
+    birthdays: localNewer ? (local.birthdays || []) : (remote.birthdays || []),
+    goals:     { ...DEFAULT_GOALS, ...(localNewer ? local.goals : remote.goals || {}) },
+    profile:   localNewer ? (local.profile || {})   : (remote.profile || {}),
   };
+}
+
+function applyRemote(d) {
+  const hasPendingLocal = pushPending || lastLocalEditAt > lastSyncedEditAt;
+  if (hasPendingLocal) {
+    S = mergeRemote(d);
+    schedulePush(); // renvoyer l'état fusionné pour faire converger les appareils
+  } else {
+    S = {
+      days:      d.days      || {},
+      deleted:   d.deleted   || {},
+      planning:  d.planning  || {},
+      birthdays: d.birthdays || [],
+      goals:     { ...DEFAULT_GOALS, ...(d.goals || {}) },
+      profile:   d.profile   || {},
+    };
+    setSyncUI('ok');
+  }
   if (S.profile.name && currentUser) {
     currentUser.name = S.profile.name;
     refreshIdentityUI();
@@ -522,8 +604,8 @@ function applyRemote(d) {
 
 async function forcePush() {
   if (mode !== 'cloud') return;
-  await pushNow();
-  showToast('⬆️ Données envoyées dans le cloud');
+  const ok = await pushNow();
+  showToast(ok ? '⬆️ Données envoyées dans le cloud' : '❌ Échec de l\'envoi — voir le statut ci-dessus');
 }
 async function forcePull() {
   if (mode !== 'cloud') return;
@@ -595,8 +677,13 @@ function renderActiveView() {
 /* ════════════════════════════════════════════
    VUE : AUJOURD'HUI
 ════════════════════════════════════════════ */
+/* Date affichée par la vue « Aujourd'hui » — capturée au chargement pour que
+   les saisies après minuit restent rattachées au jour affiché */
+let todayViewDate = null;
+const activeDayKey = () => todayViewDate || todayKey();
+
 function loadTodayView() {
-  const dateStr = todayKey();
+  const dateStr = todayViewDate = todayKey();
   const day = S.days[dateStr] || {};
 
   // Accueil
@@ -657,7 +744,7 @@ function calcStreak() {
 }
 
 function saveToday(manual = false) {
-  const dateStr  = todayKey();
+  const dateStr  = activeDayKey();
   const existing = S.days[dateStr] || {};
 
   const sport = {
@@ -722,7 +809,7 @@ function addExpense() {
   const amtEl = $('expenseAmt'), lblEl = $('expenseLabel');
   const amt = parseFloat(amtEl.value);
   if (!amt || isNaN(amt) || amt <= 0) { showToast('⚠️ Entrez un montant valide'); amtEl.focus(); return; }
-  const dateStr = todayKey();
+  const dateStr = activeDayKey();
   const day = S.days[dateStr] = S.days[dateStr] || {};
   (day.expenses = day.expenses || []).push({
     id: uid(),
@@ -739,7 +826,7 @@ function addExpense() {
 }
 
 function deleteExpense(id) {
-  const day = S.days[todayKey()];
+  const day = S.days[activeDayKey()];
   if (!day) return;
   day.expenses = (day.expenses || []).filter(e => String(e.id) !== String(id));
   day.updatedAt = Date.now();
@@ -766,7 +853,7 @@ function addActivity() {
   const input = $('activityInput');
   const txt = input.value.trim();
   if (!txt) return;
-  const dateStr = todayKey();
+  const dateStr = activeDayKey();
   const day = S.days[dateStr] = S.days[dateStr] || {};
   (day.activities = day.activities || []).push({ id: uid(), text: txt });
   day.updatedAt = Date.now();
@@ -777,7 +864,7 @@ function addActivity() {
 }
 
 function deleteActivity(id) {
-  const day = S.days[todayKey()];
+  const day = S.days[activeDayKey()];
   if (!day) return;
   day.activities = (day.activities || []).filter(a => String(a.id) !== String(id));
   day.updatedAt = Date.now();
@@ -894,6 +981,7 @@ async function deleteDay(ds) {
   });
   if (!ok) return false;
   delete S.days[ds];
+  (S.deleted = S.deleted || {})[ds] = Date.now();
   persist();
   const detail = $('dayDetailCard');
   if (detail.dataset.date === ds) detail.style.display = 'none';
@@ -1261,7 +1349,7 @@ function savePlanning() {
       enabled: ($(`plen_${i}`) && $(`plen_${i}`).checked) || false,
       start:   ($(`plstart_${i}`) && $(`plstart_${i}`).value) || '',
       end:     ($(`plend_${i}`) && $(`plend_${i}`).value) || '',
-      pause:   parseFloat($(`plbreak_${i}`) && $(`plbreak_${i}`).value) || 60,
+      pause:   numOr($(`plbreak_${i}`) && $(`plbreak_${i}`).value, 60),
     };
   }
   persist();
@@ -1303,16 +1391,8 @@ function renderBirthdays() {
     el.innerHTML = '<div class="empty-state"><span class="empty-emoji">🎂</span>Aucun anniversaire enregistré.<br>Ajoutez vos proches pour ne plus jamais oublier !</div>';
     return;
   }
-  const t0 = new Date();
-  const today = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate());
-  const withNext = S.birthdays.map(b => {
-    const bdate = new Date(b.date + 'T00:00:00');
-    let next = new Date(today.getFullYear(), bdate.getMonth(), bdate.getDate());
-    if (next < today) next.setFullYear(today.getFullYear() + 1);
-    const daysLeft = Math.round((next - today) / 864e5);
-    const turning = next.getFullYear() - bdate.getFullYear();
-    return { ...b, bdate, daysLeft, turning };
-  }).sort((a, b) => a.daysLeft - b.daysLeft);
+  const withNext = S.birthdays.map(b => ({ ...b, ...nextBdayInfo(b.date) }))
+    .sort((a, b) => a.daysLeft - b.daysLeft);
 
   el.innerHTML = withNext.map(b => {
     const isToday = b.daysLeft === 0;
@@ -1337,10 +1417,20 @@ function renderBirthdays() {
 
 const identityKey = () => mode === 'cloud' ? (currentUser && currentUser.uid) : (currentUser && currentUser.name);
 
+/* Prochaine occurrence d'un anniversaire (un 29/02 devient le 01/03 les
+   années non bissextiles — même règle pour la liste et le popup) */
+function nextBdayInfo(dateStr) {
+  const t0 = new Date();
+  const today = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate());
+  const bdate = new Date(dateStr + 'T00:00:00');
+  let next = new Date(today.getFullYear(), bdate.getMonth(), bdate.getDate());
+  if (next < today) next = new Date(today.getFullYear() + 1, bdate.getMonth(), bdate.getDate());
+  const daysLeft = Math.round((next - today) / 864e5);
+  return { bdate, daysLeft, turning: next.getFullYear() - bdate.getFullYear() };
+}
+
 function checkBirthdays() {
-  const today = new Date();
-  const todayMD = `${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  const todayBdays = S.birthdays.filter(b => (b.date || '').slice(5) === todayMD);
+  const todayBdays = S.birthdays.filter(b => b.date && nextBdayInfo(b.date).daysLeft === 0);
   if (!todayBdays.length) return;
   const flagKey = 'bdayShown_' + identityKey();
   if (localStorage.getItem(flagKey) === todayKey()) return;
@@ -1349,9 +1439,8 @@ function checkBirthdays() {
 }
 
 function showBdayPopup(bdays) {
-  const today = new Date();
   $('bdayNames').innerHTML = bdays.map(b => {
-    const age = today.getFullYear() - new Date(b.date + 'T00:00:00').getFullYear();
+    const age = nextBdayInfo(b.date).turning;
     return `<div>🎂 ${esc(b.name)} — ${age} an${age > 1 ? 's' : ''} !</div>`;
   }).join('');
   const popup = $('birthdayPopup');
@@ -1389,10 +1478,10 @@ function spawnBdayConfetti() {
 ════════════════════════════════════════════ */
 function saveGoals() {
   S.goals = {
-    steps:  parseFloat($('goalSteps').value)  || DEFAULT_GOALS.steps,
-    sport:  parseFloat($('goalSport').value)  || DEFAULT_GOALS.sport,
-    budget: parseFloat($('goalBudget').value) || DEFAULT_GOALS.budget,
-    work:   parseFloat($('goalWork').value)   || DEFAULT_GOALS.work,
+    steps:  numOr($('goalSteps').value,  DEFAULT_GOALS.steps),
+    sport:  numOr($('goalSport').value,  DEFAULT_GOALS.sport),
+    budget: numOr($('goalBudget').value, DEFAULT_GOALS.budget),
+    work:   numOr($('goalWork').value,   DEFAULT_GOALS.work),
   };
   persist();
   showToast('🎯 Objectifs enregistrés !');
@@ -1424,8 +1513,9 @@ function renderGoals() {
   ];
 
   $('goalsProgress').innerHTML = goals.map(g => {
-    const pct = g.target > 0 ? Math.min(100, (g.val / g.target) * 100) : 0;
-    const ok = g.inverse ? pct <= 100 : pct >= 80;
+    const rawPct = g.target > 0 ? (g.val / g.target) * 100 : 0;
+    const pct = Math.min(100, rawPct);
+    const ok = g.inverse ? rawPct <= 100 : rawPct >= 80;
     const displayVal = Number.isInteger(g.val) ? g.val.toLocaleString('fr-FR') : g.val.toFixed(1);
     const displayTarget = Number.isInteger(g.target) ? g.target.toLocaleString('fr-FR') : g.target.toFixed(1);
     return `<div class="goal-progress">
@@ -1525,18 +1615,21 @@ async function deleteAccount() {
   try {
     stopCloudListener();
     await userDocRef().delete();
-    try { localStorage.removeItem(cacheKey()); } catch (e) {}
     await fbAuth.currentUser.delete();
+    // Succès seulement : on peut nettoyer le cache local
+    try { localStorage.removeItem(cacheKey()); } catch (e) {}
     localStorage.removeItem('vieMode');
     showToast('Compte supprimé. Au revoir 👋', 3200);
     // onAuthStateChanged ramène à l'écran de connexion
   } catch (e) {
+    // Restaurer immédiatement le document cloud si sa suppression a eu lieu
+    // mais pas celle du compte (les données sont toujours en mémoire)
+    await pushNow();
+    startCloudListener();
     if (e && e.code === 'auth/requires-recent-login') {
       showToast('🔒 Par sécurité, reconnectez-vous puis réessayez la suppression.', 4200);
-      startCloudListener(); // le compte existe toujours : re-synchroniser
     } else {
       showToast('❌ ' + (e && e.message || 'Erreur'), 3500);
-      startCloudListener();
     }
   }
 }
@@ -1600,6 +1693,7 @@ function importJSON(e) {
       });
       if (!ok) return;
       if (imp.days)      S.days      = imp.days;
+      if (imp.deleted)   S.deleted   = imp.deleted;
       if (imp.planning)  S.planning  = imp.planning;
       if (imp.birthdays) S.birthdays = imp.birthdays;
       if (imp.goals)     S.goals     = { ...DEFAULT_GOALS, ...imp.goals };
@@ -1624,6 +1718,7 @@ async function resetTodayConfirm() {
   });
   if (!ok) return;
   delete S.days[todayKey()];
+  (S.deleted = S.deleted || {})[todayKey()] = Date.now();
   persist();
   renderActiveView();
   showToast('🗑 Journée réinitialisée');
@@ -1643,7 +1738,11 @@ async function resetAllConfirm() {
   });
   if (!ok2) return;
   const name = currentUser && currentUser.name;
+  const now = Date.now();
+  const wiped = {};
+  Object.keys(S.days).forEach(ds => { wiped[ds] = now; });
   S = newState();
+  S.deleted = wiped; // empêche un autre appareil de « ressusciter » les jours
   if (name) S.profile.name = name;
   persist();
   renderActiveView();
@@ -1708,6 +1807,17 @@ $('confirmModal').addEventListener('click', e => { if (e.target.id === 'confirmM
 // Fermeture des modales au clic sur le fond
 $('editModal').addEventListener('click', e => { if (e.target.id === 'editModal') closeEditModal(); });
 $('birthdayPopup').addEventListener('click', e => { if (e.target.id === 'birthdayPopup') closeBdayPopup(); });
+
+// Retour sur l'app (PWA rouverte, onglet réactivé) : gérer le changement de jour
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !currentUser) return;
+  if (todayViewDate && todayViewDate !== todayKey()) {
+    $('topbarDate').textContent = new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+    if (activeView === 'today') loadTodayView();
+    else todayViewDate = null; // sera recapturée à la prochaine ouverture de la vue
+    checkBirthdays();
+  }
+});
 
 // Échap : fermer la surcouche la plus haute
 document.addEventListener('keydown', e => {

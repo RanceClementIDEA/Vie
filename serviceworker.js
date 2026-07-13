@@ -4,7 +4,7 @@
    Incrémentez CACHE_NAME à chaque mise à jour des fichiers.
 ════════════════════════════════════════════ */
 
-const CACHE_NAME = 'suivi-vie-v2.0.0';
+const CACHE_NAME = 'suivi-vie-v2.0.1';
 const ASSETS = [
   './',
   './index.html',
