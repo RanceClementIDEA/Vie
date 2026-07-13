@@ -10,11 +10,11 @@
    est alors enregistrée dans le navigateur).
 ════════════════════════════════════════════ */
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCw6E0Q4tgsIbpE2gomka8o9Ch2Z14AK7A",
-  authDomain: "vie-d8aab.firebaseapp.com",
-  projectId: "vie-d8aab",
-  storageBucket: "vie-d8aab.firebasestorage.app",
-  messagingSenderId: "949321472346",
-  appId: "1:949321472346:web:9cba9a623ac401482fbb63"
+window.FIREBASE_CONFIG = {
+  apiKey: "AIza…",
+  authDomain: "mon-projet.firebaseapp.com",
+  projectId: "mon-projet",
+  storageBucket: "mon-projet.appspot.com",
+  messagingSenderId: "…",
+  appId: "…"
 };
