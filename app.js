@@ -26,6 +26,10 @@ const THEME_CATALOG = [
   { id: 'emerald',  label: 'Émeraude',  emoji: '💎', bg: '#04231C' },
   { id: 'aurora',   label: 'Aurore',    emoji: '🌌', bg: '#0A1424' },
   { id: 'mono',     label: 'Graphite',  emoji: '⚫', bg: '#0C0C0E' },
+  { id: 'pixel',    label: 'Pixel Art', emoji: '🕹️', bg: '#17132F' },
+  { id: 'paper',    label: 'Papier',    emoji: '📜', bg: '#EFE6D3' },
+  { id: 'cyber',    label: 'Cyber',     emoji: '🔩', bg: '#070A12' },
+  { id: 'jungle',   label: 'Jungle',    emoji: '🌴', bg: '#08160D' },
 ];
 const THEMES = THEME_CATALOG.map(t => t.id);
 

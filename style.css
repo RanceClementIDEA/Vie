@@ -551,3 +551,251 @@ textarea{resize:vertical}
   .modal-overlay{align-items:center;padding:20px}
   .modal-card{border-radius:24px;animation:pop-in .25s ease both}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THÈMES TEXTURÉS  (ajout — ne modifie aucune règle ci-dessus)
+   ───────────────────────────────────────────────────────────────────────
+   • Motifs SVG (bruit + fleurs) en data-URI : aucune requête réseau, CSP-safe.
+   • Chaque thème reçoit --tex-bg (fond) et --tex-card (overlay des cartes).
+   • Les couleurs des thèmes injectés (sakura…mono) restent définies dans
+     app.js ; on n'ajoute ici que leurs variables de texture.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root{
+  /* Bruits (feTurbulence) */
+  --noise-fiber:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='nf'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23nf)' opacity='0.05'/%3E%3C/svg%3E");
+  --noise-metal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='nm'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23nm)' opacity='0.035'/%3E%3C/svg%3E");
+  --noise-organic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='no'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.015 0.025' numOctaves='4' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.09 0 0 0 0 0.30 0 0 0 0 0.14 0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23no)'/%3E%3C/svg%3E");
+  /* Fleurs de cerisier (sakura) — 2 tailles */
+  --flower-lg:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='118' height='118' viewBox='0 0 118 118'%3E%3Cg transform='translate(59 59)' fill='%23EC4899' fill-opacity='0.14'%3E%3Cpath d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(72)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(144)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(216)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(288)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3C/g%3E%3Ccircle cx='59' cy='59' r='3.4' fill='%23F59E0B' fill-opacity='0.22'/%3E%3C/svg%3E");
+  --flower-sm:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg transform='translate(40 40) scale(0.62) rotate(36)' fill='%23F472B6' fill-opacity='0.12'%3E%3Cpath d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(72)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(144)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(216)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3Cpath transform='rotate(288)' d='M0 0 C-11 -17 -16 -31 -6 -39 C-3.5 -41 -1.5 -39.5 0 -35 C1.5 -39.5 3.5 -41 6 -39 C16 -31 11 -17 0 0 Z'/%3E%3C/g%3E%3Ccircle cx='40' cy='40' r='2.2' fill='%23F59E0B' fill-opacity='0.20'/%3E%3C/svg%3E");
+}
+
+/* ── DARK — grille discrète + halos indigo/menthe ── */
+[data-theme="dark"]{
+  --tex-bg:
+    radial-gradient(90% 60% at 50% -10%,rgba(99,102,241,.16),transparent 60%),
+    radial-gradient(80% 55% at 100% 115%,rgba(52,211,153,.08),transparent 60%),
+    linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);
+  --tex-bg-size:cover,cover,40px 40px,40px 40px;
+  --tex-card:linear-gradient(180deg,rgba(255,255,255,.03),transparent 55%);
+  --tex-card-size:cover;
+}
+/* ── LIGHT — trame « blueprint » très pâle + lumière douce ── */
+[data-theme="light"]{
+  --tex-bg:
+    radial-gradient(80% 60% at 50% -10%,rgba(99,102,241,.10),transparent 60%),
+    radial-gradient(70% 50% at 100% 110%,rgba(96,165,250,.08),transparent 60%),
+    linear-gradient(rgba(15,23,42,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(15,23,42,.03) 1px,transparent 1px);
+  --tex-bg-size:cover,cover,40px 40px,40px 40px;
+  --tex-card:linear-gradient(180deg,rgba(255,255,255,.5),transparent 55%);
+  --tex-card-size:cover;
+}
+/* ── BLUE (Océan) — halos profonds + lignes d'onde ── */
+[data-theme="blue"]{
+  --tex-bg:
+    radial-gradient(90% 55% at 50% -10%,rgba(59,130,246,.22),transparent 60%),
+    radial-gradient(80% 60% at 50% 120%,rgba(37,99,235,.18),transparent 60%),
+    repeating-linear-gradient(0deg,transparent 0 22px,rgba(96,165,250,.04) 22px 23px);
+  --tex-bg-size:cover,cover,auto;
+  --tex-card:linear-gradient(180deg,rgba(96,165,250,.06),transparent 55%);
+  --tex-card-size:cover;
+}
+/* ── GREEN (Forêt) — bruit organique + halos émeraude ── */
+[data-theme="green"]{
+  --tex-bg:
+    var(--noise-organic),
+    radial-gradient(85% 55% at 50% -10%,rgba(16,185,129,.18),transparent 60%),
+    radial-gradient(70% 55% at 100% 115%,rgba(6,95,70,.32),transparent 60%);
+  --tex-bg-size:240px 240px,cover,cover;
+  --tex-card:var(--noise-organic);--tex-card-size:240px 240px;
+}
+/* ── SAKURA — vraies fleurs de cerisier (2 tailles) + lumière + grain ── */
+[data-theme="sakura"]{
+  --tex-bg:
+    var(--flower-lg),
+    var(--flower-sm),
+    radial-gradient(120% 90% at 50% 0%,rgba(255,255,255,.5),transparent 60%),
+    var(--noise-fiber);
+  --tex-bg-size:118px 118px,80px 80px,cover,120px 120px;
+  --tex-card:var(--flower-sm),linear-gradient(180deg,rgba(236,72,153,.05),transparent 55%);
+  --tex-card-size:80px 80px,cover;
+}
+/* ── CYBERPUNK — grille néon violet/cyan + scanlines + halos ── */
+[data-theme="cyberpunk"]{
+  --tex-bg:
+    linear-gradient(90deg,rgba(240,0,255,.07) 1px,transparent 1px),
+    linear-gradient(rgba(0,240,255,.06) 1px,transparent 1px),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px),
+    radial-gradient(60% 45% at 10% 0%,rgba(240,0,255,.16),transparent 70%),
+    radial-gradient(60% 45% at 100% 100%,rgba(0,245,212,.14),transparent 70%);
+  --tex-bg-size:30px 30px,30px 30px,auto,cover,cover;
+  --tex-card:
+    repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px),
+    linear-gradient(180deg,rgba(240,0,255,.05),transparent 55%);
+  --tex-card-size:auto,cover;
+}
+/* ── SUNSET — soleil bas orangé + ciel rose→violet ── */
+[data-theme="sunset"]{
+  --tex-bg:
+    radial-gradient(70% 50% at 50% 120%,rgba(251,146,60,.24),transparent 60%),
+    radial-gradient(90% 60% at 50% -10%,rgba(251,113,133,.16),transparent 60%),
+    linear-gradient(180deg,rgba(251,191,36,.05),transparent 35%,rgba(139,92,246,.07) 100%);
+  --tex-bg-size:cover,cover,cover;
+  --tex-card:linear-gradient(180deg,rgba(251,146,60,.07),transparent 55%);
+  --tex-card-size:cover;
+}
+/* ── EMERALD — facettes de gemme + éclats + halo ── */
+[data-theme="emerald"]{
+  --tex-bg:
+    linear-gradient(60deg,rgba(255,255,255,.03) 0 2px,transparent 2px 22px),
+    linear-gradient(-60deg,rgba(255,255,255,.025) 0 2px,transparent 2px 22px),
+    radial-gradient(rgba(110,231,183,.06) 1px,transparent 1.6px),
+    radial-gradient(85% 55% at 50% -10%,rgba(16,185,129,.20),transparent 60%);
+  --tex-bg-size:26px 26px,26px 26px,30px 30px,cover;
+  --tex-card:linear-gradient(60deg,rgba(255,255,255,.04) 0 2px,transparent 2px 22px);
+  --tex-card-size:26px 26px;
+}
+/* ── AURORA — rubans cyan/violet/menthe + étoiles ── */
+[data-theme="aurora"]{
+  --tex-bg:
+    radial-gradient(rgba(255,255,255,.5) .6px,transparent 1px),
+    radial-gradient(50% 40% at 20% 20%,rgba(94,234,212,.14),transparent 70%),
+    radial-gradient(55% 45% at 75% 30%,rgba(129,140,248,.14),transparent 70%),
+    radial-gradient(45% 40% at 50% 82%,rgba(34,211,238,.12),transparent 70%);
+  --tex-bg-size:64px 64px,cover,cover,cover;
+  --tex-card:linear-gradient(180deg,rgba(94,234,212,.06),transparent 55%);
+  --tex-card-size:cover;
+}
+/* ── MONO (Graphite) — métal brossé + double grille fine ── */
+[data-theme="mono"]{
+  --tex-bg:
+    var(--noise-metal),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.02) 0 1px,transparent 1px 4px),
+    linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);
+  --tex-bg-size:140px 140px,auto,44px 44px,44px 44px;
+  --tex-card:
+    var(--noise-metal),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.02) 0 1px,transparent 1px 4px);
+  --tex-card-size:140px 140px,auto;
+}
+
+/* ── PIXEL ART / rétro 8-bit (nouveau : couleurs + textures) ── */
+[data-theme="pixel"]{
+  --bg:#17132F;--bg2:#241D4A;--surface:#241D4A;--surface2:#332A63;
+  --border:rgba(62,245,139,.28);--border2:rgba(255,46,136,.18);
+  --primary:#FF2E88;--primary-l:#FF5FA2;--primary-d:#D81E6F;
+  --neon:#3EF58B;--gold:#FFD23F;--red:#FF4D4D;--blue:#4EC5FF;--orange:#FF9F45;--pink:#FF77D4;
+  --text1:#F5F0FF;--text2:#B6A8E0;--text3:#8578B0;
+  --sport:#3EF58B;--walk:#4EC5FF;--work:#FFD23F;--money:#FF77D4;--note:#B191FF;
+  --gp:0 0 0 2px rgba(62,245,139,.5),0 0 18px rgba(255,46,136,.35);
+  --tex-bg:
+    radial-gradient(rgba(255,255,255,.05) 1px,transparent 1.6px),
+    linear-gradient(90deg,rgba(124,110,190,.12) 1px,transparent 1px),
+    linear-gradient(rgba(124,110,190,.12) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,46,136,.08) 2px,transparent 2px),
+    linear-gradient(rgba(62,245,139,.08) 2px,transparent 2px),
+    radial-gradient(80% 60% at 50% 0%,rgba(255,46,136,.14),transparent 60%),
+    linear-gradient(180deg,#211A47,#161130);
+  --tex-bg-size:8px 8px,16px 16px,16px 16px,64px 64px,64px 64px,cover,cover;
+  --tex-card:
+    linear-gradient(90deg,rgba(124,110,190,.10) 1px,transparent 1px),
+    linear-gradient(rgba(124,110,190,.10) 1px,transparent 1px);
+  --tex-card-size:8px 8px,8px 8px;
+}
+/* ── PAPIER / vintage (nouveau) ── */
+[data-theme="paper"]{
+  --bg:#EFE6D3;--bg2:#F8F2E4;--surface:#F8F2E4;--surface2:#EFE4CD;
+  --border:rgba(90,66,40,.20);--border2:rgba(90,66,40,.10);
+  --primary:#9C6B3F;--primary-l:#B98A5C;--primary-d:#7D5330;
+  --neon:#5B8C5A;--gold:#C99A3F;--red:#B5533F;--blue:#5F7F97;--orange:#C47B36;--pink:#B06A7A;
+  --text1:#3A2F22;--text2:#6E5F4A;--text3:#9A8A70;
+  --sport:#4F7A3F;--walk:#3F6F8A;--work:#B07D2B;--money:#A84F7A;--note:#6A4F9A;
+  --gp:0 1px 0 rgba(255,255,255,.6),0 8px 24px rgba(90,66,40,.18);
+  --tex-bg:
+    var(--noise-fiber),
+    radial-gradient(120% 90% at 50% 0%,rgba(255,255,255,.55),transparent 60%),
+    radial-gradient(140% 120% at 50% 120%,rgba(120,90,50,.22),transparent 55%),
+    repeating-linear-gradient(0deg,transparent 0 27px,rgba(120,90,50,.05) 27px 28px),
+    linear-gradient(180deg,#F3EAD7,#E7DCC4);
+  --tex-bg-size:120px 120px,cover,cover,auto,cover;
+  --tex-card:var(--noise-fiber);--tex-card-size:120px 120px;
+}
+/* ── CYBER / métallique (nouveau) ── */
+[data-theme="cyber"]{
+  --bg:#070A12;--bg2:#0F1622;--surface:#0F1622;--surface2:#182234;
+  --border:rgba(0,229,255,.28);--border2:rgba(255,46,196,.18);
+  --primary:#00E5FF;--primary-l:#5CF2FF;--primary-d:#00B3CC;
+  --neon:#00FFA3;--gold:#FFD60A;--red:#FF3864;--blue:#2D9BFF;--orange:#FF7A1A;--pink:#FF2EC4;
+  --text1:#E8F6FF;--text2:#8AA0B8;--text3:#5A7088;
+  --sport:#00FFA3;--walk:#2D9BFF;--work:#FFD60A;--money:#FF2EC4;--note:#9B8CFF;
+  --gp:0 0 22px rgba(0,229,255,.45),0 0 40px rgba(255,46,196,.20);
+  --tex-bg:
+    linear-gradient(90deg,rgba(0,229,255,.06) 1px,transparent 1px),
+    linear-gradient(rgba(255,46,196,.05) 1px,transparent 1px),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px),
+    linear-gradient(115deg,transparent 42%,rgba(255,255,255,.05) 50%,transparent 58%),
+    var(--noise-metal),
+    radial-gradient(55% 45% at 12% 0%,rgba(0,229,255,.14),transparent 70%),
+    radial-gradient(55% 45% at 100% 100%,rgba(255,46,196,.12),transparent 70%),
+    linear-gradient(160deg,#0C1220,#070A12);
+  --tex-bg-size:34px 34px,34px 34px,auto,cover,140px 140px,cover,cover,cover;
+  --tex-card:
+    repeating-linear-gradient(90deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px),
+    linear-gradient(115deg,transparent 40%,rgba(255,255,255,.06) 50%,transparent 60%);
+  --tex-card-size:auto,cover;
+}
+/* ── JUNGLE / organique (nouveau) ── */
+[data-theme="jungle"]{
+  --bg:#08160D;--bg2:#123A24;--surface:#123A24;--surface2:#1B4D31;
+  --border:rgba(143,240,90,.22);--border2:rgba(63,174,107,.15);
+  --primary:#3FAE6B;--primary-l:#5ECB86;--primary-d:#2E8A52;
+  --neon:#8FF05A;--gold:#E3B23C;--red:#E06A4A;--blue:#3FA9A0;--orange:#E0863C;--pink:#E06AA0;
+  --text1:#EEFBE9;--text2:#A7C9A9;--text3:#6F8F72;
+  --sport:#8FF05A;--walk:#3FA9A0;--work:#E3B23C;--money:#E06AA0;--note:#9FE07A;
+  --gp:0 0 22px rgba(143,240,90,.30),0 6px 26px rgba(3,20,10,.6);
+  --tex-bg:
+    var(--noise-organic),
+    radial-gradient(rgba(143,240,90,.05) 1px,transparent 1.6px),
+    radial-gradient(40% 30% at 20% 15%,rgba(143,240,90,.10),transparent 70%),
+    radial-gradient(45% 35% at 85% 40%,rgba(63,174,107,.14),transparent 70%),
+    radial-gradient(60% 50% at 50% 120%,rgba(3,20,10,.55),transparent 60%),
+    linear-gradient(170deg,#0E2416,#08160D);
+  --tex-bg-size:240px 240px,22px 22px,cover,cover,cover,cover;
+  --tex-card:var(--noise-organic);--tex-card-size:240px 240px;
+}
+
+/* Pastilles d'aperçu (grille de thèmes) pour les nouveaux thèmes */
+.theme-swatch[data-theme="pixel"]{background:linear-gradient(135deg,#FF2E88,#3EF58B)}
+.theme-swatch[data-theme="paper"]{background:linear-gradient(135deg,#E7DCC4,#9C6B3F)}
+.theme-swatch[data-theme="cyber"]{background:linear-gradient(135deg,#00E5FF,#FF2EC4)}
+.theme-swatch[data-theme="jungle"]{background:linear-gradient(135deg,#08160D,#8FF05A)}
+
+/* Application des textures — fond de page + cartes.
+   Si un thème ne définit pas --tex-bg/--tex-card, le fallback « none »
+   laisse le rendu d'origine intact (aucune régression). */
+body{
+  background-color:var(--bg);
+  background-image:var(--tex-bg,none);
+  background-size:var(--tex-bg-size,auto);
+  background-position:center top;
+  background-attachment:fixed;
+}
+/* Préfixe « body » = spécificité (0,1,1) : bat les règles injectées plus tard
+   par injectDynamicStyles (ex. .tk-card en raccourci). N'ajoute qu'un
+   background-image → la background-color de chaque carte est préservée.
+   .greet-card est volontairement exclue (elle a déjà un dégradé). */
+body .section-card,body .modal-card,body .tk-card,body .stat-tile,body .chart-card,
+body .plan-day-card,body .goal-progress,body .day-detail-card,body .bday-item,
+body .settings-section,body .login-card{
+  background-image:var(--tex-card,none);
+  background-size:var(--tex-card-size,auto);
+  background-repeat:repeat;
+}
+[data-theme="pixel"] img,[data-theme="pixel"] canvas{image-rendering:pixelated}
+
+/* Lisibilité : en mono, --primary est quasi-blanc → texte sombre sur boutons pleins */
+[data-theme="mono"] .btn-primary,[data-theme="mono"] .btn-save,
+[data-theme="mono"] #authSubmit,[data-theme="mono"] #loginBtn{color:#0C0C0E}
