@@ -538,7 +538,6 @@ textarea{resize:vertical}
 ════════════════════════════════════ */
 @media(max-width:480px){
   .input-row{grid-template-columns:1fr}
-  .input-row.triple{grid-template-columns:1fr 1fr 1fr}
   .stats-grid{grid-template-columns:1fr 1fr}
   .plan-day-fields{grid-template-columns:1fr}
   .modal-actions{flex-direction:column-reverse}
@@ -799,3 +798,85 @@ body .settings-section,body .login-card{
 /* Lisibilité : en mono, --primary est quasi-blanc → texte sombre sur boutons pleins */
 [data-theme="mono"] .btn-primary,[data-theme="mono"] .btn-save,
 [data-theme="mono"] #authSubmit,[data-theme="mono"] #loginBtn{color:#0C0C0E}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESPONSIVE 2.0 — anti-débordement + frame centré desktop
+   (placé en fin de fichier : dernier mot dans la cascade)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* (a) CAUSE RACINE des colonnes coupées : par défaut un enfant de grille/flex
+   a min-width:auto et ne peut pas descendre sous la largeur mini de son
+   contenu — les <input> imposent alors leur taille et font déborder la rangée.
+   On autorise le rétrécissement partout où c'est utile. */
+.input-group,.plan-field,.theme-opt,.stat-tile,.tk-card,.chart-card,
+.goal-progress,.bday-item,.bday-info,.hist-item,.cal-cell,.greet-body,
+.expense-item,.activity-item,.tk-custom-form>*,.stats-custom-row .input-group,
+.tk-num-wrap,.pw-wrap,.bnav{min-width:0}
+input,select,textarea{max-width:100%;min-width:0}
+#mainContent{overflow-x:hidden}          /* filet de sécurité anti-scroll horizontal */
+.view{max-width:100%}
+
+/* min-width:0 retire le plancher min-content : les chaînes insécables
+   (e-mail, long mot) doivent CASSER au lieu d'être rognées en silence
+   par l'overflow-x:hidden ci-dessus. */
+.greet-body,.tk-card,.hist-item,.goal-progress,.chart-card,.stat-tile{overflow-wrap:break-word}
+
+/* Barre de nav du bas : 5 onglets doivent tenir même à 320px. On garde la
+   taille de police de base (9px) pour la lisibilité ; seul le padding se
+   resserre, avec ellipsis en ultime filet de sécurité. */
+.bnav-lbl{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+@media(max-width:380px){
+  #bottomNav{padding-left:2px;padding-right:2px}
+  .bnav{padding:6px 4px}
+  .bnav-icon{font-size:18px}
+  .bnav-lbl{letter-spacing:0}
+}
+
+/* (b) Rangée « triple » (Début / Fin / Pause) : s'adapte au lieu de déborder.
+   3 colonnes dès que ça rentre (≥341px), sinon empilée (voir bloc c) —
+   jamais d'orphelin « 2 + 1 ». */
+.input-row.triple,.plan-day-fields{grid-template-columns:repeat(auto-fit,minmax(84px,1fr))}
+
+/* (c) Très petits écrans (≤340px) : on empile ce qui est à l'étroit.
+   La grille de thèmes reste sur 2 colonnes compactes (14 thèmes → une
+   colonne unique ferait une liste interminable). */
+@media(max-width:340px){
+  .stats-grid{grid-template-columns:1fr}
+  .theme-grid{grid-template-columns:1fr 1fr;gap:8px}
+  .input-row.triple,.plan-day-fields{grid-template-columns:1fr}
+  .expense-add-row,.activity-add-row{flex-wrap:wrap}
+  .expense-add-row .btn,.activity-add-row .btn{width:100%}
+  .history-filters{flex-direction:column;align-items:stretch}
+}
+
+/* Paysage téléphone / fenêtres basses : les overlays centrés doivent
+   pouvoir défiler à l'intérieur plutôt que d'être rognés.
+   (.modal-card a déjà max-height+overflow dans la base.) */
+.popup-card{max-height:88dvh;overflow-y:auto}
+
+/* (d) Tablette / desktop : colonne centrée (fin de l'étirement pleine largeur).
+   Le frame reçoit SA propre texture (non fixe, recentrée sur lui) : la
+   couture à la bordure le détache visuellement du fond de page. */
+@media(min-width:720px){
+  #app{
+    max-width:600px;margin-inline:auto;
+    border-left:1px solid var(--border);border-right:1px solid var(--border);
+    box-shadow:0 0 0 1px var(--border2),0 24px 70px rgba(0,0,0,.32);
+    background-color:var(--bg);
+    background-image:var(--tex-bg,none);
+    background-size:var(--tex-bg-size,auto);
+    background-position:center top;
+  }
+  .theme-grid{grid-template-columns:repeat(3,1fr)}
+  /* Le menu latéral glisse depuis le bord du FRAME, pas du viewport.
+     visibility masque la position fermée (sinon elle serait visible dans
+     la gouttière) tout en préservant l'animation d'ouverture/fermeture. */
+  #sideMenu{left:calc(50% - 300px);visibility:hidden;
+    transition:transform .25s ease,visibility 0s linear .25s}
+  #sideMenu.open{visibility:visible;transition:transform .25s ease,visibility 0s}
+}
+@media(min-width:1100px){
+  #app{max-width:680px}
+  #sideMenu{left:calc(50% - 340px)}
+  .theme-grid{grid-template-columns:repeat(4,1fr)}
+}
